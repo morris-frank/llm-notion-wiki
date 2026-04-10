@@ -439,6 +439,104 @@ class WorkerFlowTests(unittest.TestCase):
             record = json.loads((root / "state" / "runs" / "shared" / "job_update.json").read_text(encoding="utf-8"))
             self.assertIn("mismatched source_id", record["failure"]["message"])
 
+    def test_dry_run_writes_run_record_skips_disk_and_wiki_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            source = SourceRecord(
+                page_id="source-page-id",
+                source_id="src_1",
+                source_type="web_page",
+                title="Example Source",
+                canonical_url="https://example.com/source",
+                trust_level="primary",
+                status="queued",
+                scope="shared",
+                content_version=1,
+            )
+            repository = FakeRepository(source)
+            fetcher = FakeFetcher(root)
+            fetcher.fetch(source)
+            body = """# Example Source
+
+## One-line summary
+Summary. [S:src_1]
+
+## Source summary
+Summary. [S:src_1]
+
+## Main claims
+- Claim. [S:src_1]
+
+## Important entities
+- None.
+
+## Important concepts
+- Concept [S:src_1]
+
+## Reliability notes
+- Note. [S:src_1]
+
+## Related pages
+- [[index]]
+
+## Change log
+- 2026-04-10: created
+
+## Sources
+- [S:src_1] Example Source. https://example.com/source
+"""
+            md_content = (
+                "---\n"
+                'title: "Example Source"\npage_type: source\nslug: src-1\nstatus: draft\n'
+                'updated_at: "2026-04-10T00:00:00Z"\nsource_ids:\n  - "src_1"\nsource_scope:\n  - shared\n'
+                "entity_keys: []\nconcept_keys: []\nconfidence: medium\nreview_required: false\n"
+                'scope: shared\nowner: null\nreview_state: unreviewed\npromotion_origin: null\n'
+                'source_type: web_page\ncanonical_url: "https://example.com/source"\nchecksum: "sha256:test"\n---\n'
+                + body
+            )
+            plan_payload = {
+                "schema_version": "v1",
+                "job_id": "job_update",
+                "source_id": "src_1",
+                "run_mode": "dry_run",
+                "summary": {
+                    "decision": "create_new_pages",
+                    "reason": "Dry run only.",
+                    "review_required": False,
+                    "confidence": "medium",
+                },
+                "touched_paths": ["wiki/shared/sources/src_1.md"],
+                "operations": [
+                    {
+                        "op": "create_file",
+                        "path": "wiki/shared/sources/src_1.md",
+                        "page_type": "source",
+                        "reason": "Create source summary.",
+                        "content": md_content,
+                    }
+                ],
+                "manifest_update": {
+                    "source_page": "wiki/shared/sources/src_1.md",
+                    "affected_pages": ["wiki/shared/sources/src_1.md"],
+                },
+                "warnings": [],
+            }
+            planner = StaticPlanner(response=json.dumps(plan_payload))
+            worker = Worker(repository=repository, source_fetcher=fetcher, planner=planner, wiki_root=root, worker_name="test-worker")
+            worker.run_job(
+                JobRecord("update-page-id", "job_update", "update_wiki", "queued", None, "shared", None, source.page_id)
+            )
+            record = json.loads((root / "state" / "runs" / "shared" / "job_update.json").read_text(encoding="utf-8"))
+            self.assertTrue(record.get("dry_run"))
+            self.assertIsNone(record.get("failure"))
+            self.assertEqual(repository.upserted_pages, [])
+            self.assertIsNone(repository.updated_source_summary)
+            self.assertFalse((root / "wiki" / "shared" / "sources" / "src_1.md").exists())
+            diff_path = root / "exports" / "diffs" / "shared" / "job_update.patch"
+            self.assertFalse(diff_path.exists())
+            self.assertFalse((root / "state" / "manifests" / "shared" / "src_1.json").exists())
+
     def test_lost_job_claim_skips_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

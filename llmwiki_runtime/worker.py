@@ -502,7 +502,7 @@ class Worker:
         self._ensure_scope(question.scope_context)
         policy = self._load_policy(question.scope_context)
         bundle = self._build_question_bundle(job, question)
-        metadata_by_path, _, _, wiki_page_ids_by_path = self._run_planned_wiki_job(
+        metadata_by_path, _, _, wiki_page_ids_by_path, dry_run = self._run_planned_wiki_job(
             job=job,
             started_at=started_at,
             scope_context=question.scope_context,
@@ -512,6 +512,8 @@ class Worker:
             current_source_scope=None,
             require_canonical_source_page=False,
         )
+        if dry_run:
+            return
         answer_metadata = None
         for metadata in metadata_by_path.values():
             if metadata.page_type == "faq":
@@ -540,7 +542,7 @@ class Worker:
             raise ValueError("Only approved promotions may be applied")
         bundle, candidate_path = self._build_promotion_bundle(job, promotion)
         policy = self._load_policy(ScopeContext("shared"))
-        _, changed, run_record_path, _ = self._run_planned_wiki_job(
+        _, changed, run_record_path, _, dry_run = self._run_planned_wiki_job(
             job=job,
             started_at=started_at,
             scope_context=ScopeContext("shared"),
@@ -550,6 +552,8 @@ class Worker:
             current_source_scope=None,
             require_canonical_source_page=False,
         )
+        if dry_run:
+            return
         summary = {
             "promotion_id": promotion.promotion_id,
             "candidate_path": str(candidate_path),
@@ -573,7 +577,7 @@ class Worker:
         require_canonical_source_page: bool,
         source_summary_pointer: str | None = None,
         source_record: SourceRecord | None = None,
-    ) -> tuple[dict[str, Any], dict[str, tuple[str, str]], Path, dict[str, str]]:
+    ) -> tuple[dict[str, Any], dict[str, tuple[str, str]], Path, dict[str, str], bool]:
         raw_model_output = self.planner.plan(bundle) if self.planner is not None else ""
         log_event(LOGGER, "planner_output_received", job_id=job.job_id, scope=job.scope, owner=job.owner)
         self.repository.update_job_phase(job.page_id, "validating_plan")
@@ -607,6 +611,24 @@ class Worker:
             self._apply_metadata_overrides(state, metadata_by_path)
             self.repository.update_job_phase(job.page_id, "applying_changes")
             changed = changed_files(plan, state, root=self.wiki_root)
+            if plan.run_mode == "dry_run":
+                run_record_path = write_run_record(
+                    scoped_paths=scoped_paths,
+                    job_id=job.job_id,
+                    raw_model_output=raw_model_output,
+                    plan=plan,
+                    changed=changed,
+                    manifest_path=None,
+                    dry_run=True,
+                )
+                self.repository.update_job_phase(job.page_id, "syncing_state")
+                self.repository.mark_job_succeeded(
+                    job.page_id,
+                    started_at=started_at,
+                    output_pointer=run_record_path.as_uri(),
+                    diff_pointer=None,
+                )
+                return metadata_by_path, changed, run_record_path, {}, True
             atomic_write_files(changed, root=self.wiki_root)
             diff_path = write_diff(job.job_id, changed=changed, scoped_paths=scoped_paths)
             manifest_path = None
@@ -647,7 +669,7 @@ class Worker:
                 output_pointer=run_record_path.as_uri(),
                 diff_pointer=diff_path.as_uri(),
             )
-            return metadata_by_path, changed, run_record_path, wiki_page_ids_by_path
+            return metadata_by_path, changed, run_record_path, wiki_page_ids_by_path, False
         except (ValueError, JobExecutionError) as exc:
             output_pointer = self._persist_failure_record(
                 scope_context=scope_context,

@@ -142,29 +142,41 @@ SCHEMA_PRIVATE = """# Private schema
 """
 
 
-SCHEMA_PROMOTION = """# Promotion schema placeholder
+SCHEMA_PROMOTION = """# Promotion schema
 
-Promotion is deferred.
-Reserved fields: `review_state`, `promotion_origin`.
-Shared pages must not depend on private content until promotion exists.
+Promotion is implemented end-to-end in the runtime:
+
+- **Notion:** Promotions data source (when `PROMOTIONS_DS_ID` is set) holds promotion rows (status, decision, source private page, target shared pages).
+- **Filesystem:** Candidate JSON may be written under `reviews/promotion_queue/`. Approved runs log to `state/promotion_logs/<promotion_id>.json` and `reviews/approved/` summaries.
+- **Jobs:** `promote_private` runs only when promotion status is approved; the worker builds a bundle from the private source page on disk and applies an LLM plan under `wiki/shared/` only.
+
+Rules:
+
+- Shared compiled pages must not depend on private sources until a promotion has been approved and applied.
+- Preserve `review_state` and `promotion_origin` in page frontmatter where relevant.
+- Promotion copies or rewrites content into shared; it does not expose private URLs as the sole citation without shared-safe framing.
 """
 
 
-SCHEMA_TAXONOMY = """# Taxonomy
+SCHEMA_TAXONOMY = """# Taxonomy (matches `paths.py`)
 
-- shared wiki roots:
-  - `wiki/shared/sources/`
-  - `wiki/shared/concepts/`
-  - `wiki/shared/entities/`
-  - `wiki/shared/faq/`
-  - `wiki/shared/open_questions/`
-  - `wiki/shared/synthesis/`
-  - `wiki/shared/indexes/`
-- private wiki roots:
-  - `wiki/users/<owner>/sources/`
-  - `wiki/users/<owner>/concepts/`
-  - `wiki/users/<owner>/faq/`
-  - `wiki/users/<owner>/open_questions/`
-  - `wiki/users/<owner>/synthesis/`
-  - `wiki/users/<owner>/indexes/`
+**Shared scope** (`wiki/shared/`):
+
+- `sources/` — per-source summary pages
+- `concepts/` — definitions and narrative pages
+- `entities/` — canonical entity pages (shared only in current layout)
+- `faq/` — answered Q&A
+- `open_questions/` — unresolved questions (`page_type` **question** in plans)
+- `synthesis/` — e.g. current-state
+- `indexes/` — `index.md` (navigation) and `ingest-log.md` (changelog; `page_type` **changelog**)
+
+**Private scope** (`wiki/users/<owner>/`):
+
+- `sources/`, `concepts/`, `faq/`, `open_questions/`, `synthesis/`, `indexes/` (same roles; no `entities/` root in seeded private layout)
+
+**Raw** mirrors scope: `raw/shared/canonical/<source_id>/`, `raw/users/<owner>/canonical/<source_id>/`.
+
+**State:** `state/manifests/{shared|users/<owner>}/`, `state/runs/{shared|users/<owner>}/`, `state/promotion_logs/`.
+
+**Exports:** `exports/diffs/{shared|users/<owner>}/<job_id>.patch`.
 """

@@ -645,11 +645,13 @@ def write_run_record(
     changed: dict[str, tuple[str, str]] | None = None,
     manifest_path: Path | None = None,
     failure: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> Path:
     record_path = scoped_paths.run_record_path(job_id)
     record_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "job_id": job_id,
+        "dry_run": dry_run,
         "scope": scoped_paths.scope_context.scope,
         "owner": scoped_paths.scope_context.owner_or_null,
         "raw_model_output": raw_model_output,
