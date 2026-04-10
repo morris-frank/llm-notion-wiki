@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 from pathlib import Path
+from typing import Any
 import tempfile
 from urllib import error
 import unittest
 
 from llmwiki_runtime.config import Settings
-from llmwiki_runtime.models import ScopeContext
-from llmwiki_runtime.service import ServiceApp
+from llmwiki_runtime.models import ScopeContext, WebhookResolveSource
+from llmwiki_runtime.service import ServiceApp, serve
 
 
 class StubRepository:
@@ -51,9 +52,19 @@ class StubRepository:
         idempotency_key: str,
         scope_context: ScopeContext,
         policy_page_id: str | None = None,
+        **kwargs: Any,
     ):
         self.created_jobs.append((job_type, idempotency_key, scope_context))
         return type("Job", (), {"job_id": "job-1", "scope": scope_context.scope, "owner": scope_context.owner})()
+
+    def resolve_webhook_page(self, page_id: str) -> WebhookResolveSource | None:
+        try:
+            source = self.get_source(page_id)
+        except error.HTTPError:
+            return None
+        if source.properties.get("Source Title") is None:
+            return None
+        return WebhookResolveSource(source=source)
 
     def query_jobs(self, *, status: str | None = None, page_size: int = 20):
         return []
@@ -105,6 +116,32 @@ def _settings(tmpdir: str) -> Settings:
 
 
 class ServiceAndScriptTests(unittest.TestCase):
+    def test_serve_refuses_public_bind_without_admin_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                notion_token="token",
+                notion_version="2026-03-11",
+                notion_api_base="https://api.notion.com/v1",
+                control_db_id=None,
+                sources_data_source_id="sources",
+                wiki_data_source_id="wiki",
+                jobs_data_source_id="jobs",
+                policies_data_source_id="policies",
+                wiki_root=Path(tmpdir),
+                worker_name="worker",
+                poll_interval_seconds=5,
+                admin_api_key=None,
+                allow_insecure_admin=False,
+                llm_api_key=None,
+                llm_api_base="https://example.com/v1",
+                llm_model=None,
+                notion_webhook_signing_secret=None,
+                notion_webhook_verification_token=None,
+                log_level="INFO",
+            )
+            with self.assertRaises(SystemExit):
+                serve(settings, "0.0.0.0", 8000)
+
     def test_webhook_signature_and_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
@@ -144,6 +181,33 @@ class ServiceAndScriptTests(unittest.TestCase):
             status, payload = app.handle_webhook(b'{"verification_token":"verify-token"}', {})
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
+
+    def test_webhook_rejects_handshake_when_verification_token_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                notion_token="token",
+                notion_version="2026-03-11",
+                notion_api_base="https://api.notion.com/v1",
+                control_db_id=None,
+                sources_data_source_id="sources",
+                wiki_data_source_id="wiki",
+                jobs_data_source_id="jobs",
+                policies_data_source_id="policies",
+                wiki_root=Path(tmpdir),
+                worker_name="worker",
+                poll_interval_seconds=5,
+                admin_api_key=None,
+                llm_api_key=None,
+                llm_api_base="https://example.com/v1",
+                llm_model=None,
+                notion_webhook_signing_secret="signing-secret",
+                notion_webhook_verification_token=None,
+                log_level="INFO",
+            )
+            app = ServiceApp(settings=settings, worker=StubWorker())
+            status, payload = app.handle_webhook(b'{"verification_token":"any"}', {})
+            self.assertEqual(status, 503)
+            self.assertIn("NOTION_WEBHOOK_VERIFICATION_TOKEN", payload["error"])
 
     def test_webhook_non_page_entity_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

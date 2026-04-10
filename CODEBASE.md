@@ -8,7 +8,7 @@ Single package: **`llmwiki_runtime`** (console entry: `llmwiki-runtime` → `cli
 | `cli.py` | Argparse subcommands; wires settings, worker, `ServiceApp`, live verification. |
 | `service.py` | `build_worker()`, `ServiceApp` (HTTP helpers, webhook handling, job enqueue), `LLMWikiHTTPServer` + `serve()` (worker thread + server). |
 | `worker.py` | `Worker` — job execution: ingest → `update_wiki`, LLM plan → `wiki_ops`, Notion sync, questions, promotions. |
-| `repository.py` | `NotionRepository` — maps Notion pages ↔ records; jobs CRUD, policies, wiki/entity/question/promotion updates. |
+| `repository.py` | `NotionRepository` — maps Notion pages ↔ records; jobs CRUD, policies, wiki/entity/question/promotion updates; `resolve_webhook_page` for webhook routing. |
 | `notion.py` | `NotionClient` (stdlib `urllib`), property builders, page markdown export. |
 | `models.py` | Dataclasses: `ScopeContext`, sources, jobs, policies, `RunPlan`, etc. |
 | `wiki_ops.py` | Parse/validate LLM run plans, apply file ops, manifests, diffs, atomic writes. |
@@ -48,9 +48,9 @@ Single package: **`llmwiki_runtime`** (console entry: `llmwiki-runtime` → `cli
 
 **Security**
 
-- **`ADMIN_API_KEY` unset**: `_admin_authorized()` treats all admin requests as allowed. Set a key in any exposed deployment.
-- **Webhook crypto**: `_signed` may use either `NOTION_WEBHOOK_SIGNING_SECRET` or, if the former is missing, `NOTION_WEBHOOK_VERIFICATION_TOKEN` as the HMAC key. Notion’s verification token is primarily for the subscription handshake; prefer the **signing secret** for `X-Notion-Signature` and keep semantics aligned with Notion’s docs.
-- **SSRF / arbitrary fetch**: `SourceFetcher` requests URLs from Notion-defined sources (`web_page`). Compromise or misuse of Notion rows could point fetches at internal URLs — mitigate with network policy or URL allowlists if needed.
+- **`ADMIN_API_KEY` unset**: `_admin_authorized()` allows any client for `/admin/*`. `serve` logs a warning and exits unless the bind address is loopback-only (`127.0.0.1`, `::1`, `localhost`) or `LLMWIKI_INSECURE_ADMIN=1` is set. Set `ADMIN_API_KEY` for exposed deployments.
+- **Webhook crypto**: `X-Notion-Signature` is verified only with `NOTION_WEBHOOK_SIGNING_SECRET`. `NOTION_WEBHOOK_VERIFICATION_TOKEN` is for Notion’s subscription handshake payload only, not for HMAC. Handshake requests that include `verification_token` are rejected with 503 if the env token is unset.
+- **SSRF / arbitrary fetch**: `SourceFetcher` only allows `http`/`https` and rejects hosts that resolve to non-public addresses (private, loopback, link-local, etc.). DNS rebinding can still bypass hostname checks; run the worker in a network-isolated environment if the Notion integration is not trusted.
 - **Secrets in files**: `env.local` is gitignored; never commit tokens. Rotate anything that ever leaked into a repo or chat.
 
 **Operations**
@@ -61,9 +61,8 @@ Single package: **`llmwiki_runtime`** (console entry: `llmwiki-runtime` → `cli
 
 **Design / maintainability**
 
-- **`__code__.co_varnames` introspection** in `ServiceApp._create_job` and `Worker._create_job` / `_update_source_after_wiki` / `_upsert_wiki_page`: backward-compatibility shim for tests or alternate repository implementations — brittle and easy to break when renaming parameters.
 - **`Worker.run_job`**: Unknown exceptions are marked failed then **re-raised** — logged by the service loop; job state is still “failed,” but the exception propagates (intentional for visibility, noisy in logs).
-- **Private repository methods from `ServiceApp`**: e.g. `_source_from_page`, `_question_from_page` — webhook path reaches into “private” helpers; coupling between layers is tight.
+- **Webhook routing**: `NotionRepository.resolve_webhook_page` maps a page id to source/question/promotion jobs; `ServiceApp` no longer calls `_source_from_page` / `_question_from_page` directly.
 
 **Testing gaps**
 

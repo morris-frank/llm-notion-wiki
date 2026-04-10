@@ -43,6 +43,7 @@ class Settings:
     questions_data_source_id: str | None = None
     promotions_data_source_id: str | None = None
     public_base_url: str | None = None
+    allow_insecure_admin: bool = False
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -70,4 +71,5 @@ class Settings:
             notion_webhook_verification_token=data.get("NOTION_WEBHOOK_VERIFICATION_TOKEN"),
             public_base_url=data.get("PUBLIC_BASE_URL"),
             log_level=data.get("LOG_LEVEL", "INFO"),
+            allow_insecure_admin=(data.get("LLMWIKI_INSECURE_ADMIN", "").strip().lower() in {"1", "true", "yes"}),
         )
