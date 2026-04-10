@@ -149,6 +149,15 @@ class WikiOpsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ScopedPaths(root, ScopeContext("private", "../../tmp")).wiki_scope_root
 
+    def test_rejects_unsafe_source_id_in_generated_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            scoped_paths = ScopedPaths(root, ScopeContext("shared"))
+            with self.assertRaises(ValueError):
+                scoped_paths.source_page_path("../escape")
+            with self.assertRaises(ValueError):
+                scoped_paths.manifest_path("nested/source")
+
     def test_rejects_poisoned_manifest_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

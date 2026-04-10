@@ -169,7 +169,7 @@ class NotionRepository:
         finished_at = now_iso()
         props = {
             "Job Status": select_property("failed"),
-            "Job Phase": select_property("running"),
+            "Job Phase": select_property(None),
             "Finished At": date_property(finished_at),
             "Error Class": select_property(error_class),
             "Error Message": rich_text_property(message[:1800]),
@@ -410,7 +410,12 @@ class NotionRepository:
                     allowed.append(candidate)
             if not allowed:
                 raise ValueError(f"Source {source_id} is not accessible from {page_scope_context.scope} scope")
-            resolved_page_ids.extend(record.page_id for record in allowed)
+            if len(allowed) > 1:
+                raise ValueError(
+                    f"Source {source_id} is ambiguous from {page_scope_context.scope} scope; "
+                    "backing source IDs must resolve to exactly one accessible source row"
+                )
+            resolved_page_ids.append(allowed[0].page_id)
         return sorted(set(resolved_page_ids))
 
     def upsert_wiki_page(

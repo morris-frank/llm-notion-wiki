@@ -76,8 +76,11 @@ class ScopedPaths:
     def promotion_logs_root(self) -> Path:
         return self.root / "state" / "promotion_logs"
 
+    def source_id_segment(self, source_id: str) -> str:
+        return safe_path_segment(source_id, label="source_id")
+
     def source_artifact_dir(self, source_id: str) -> Path:
-        return self.raw_canonical_root / safe_path_segment(source_id, label="source_id")
+        return self.raw_canonical_root / self.source_id_segment(source_id)
 
     def source_artifact_dir_relative(self, source_id: str) -> str:
         return self.relative(self.source_artifact_dir(source_id))
@@ -98,7 +101,7 @@ class ScopedPaths:
         return self.page_dir(page_type) / filename
 
     def source_page_path(self, source_id: str) -> Path:
-        return self.page_path("source", f"{source_id}.md")
+        return self.page_path("source", f"{self.source_id_segment(source_id)}.md")
 
     def index_page_path(self) -> Path:
         return self.page_path("index", INDEX_SEED_FILENAME)
@@ -110,7 +113,7 @@ class ScopedPaths:
         return self.page_path("changelog", CHANGELOG_SEED_FILENAME)
 
     def manifest_path(self, source_id: str) -> Path:
-        return self.manifests_root / f"{source_id}.json"
+        return self.manifests_root / f"{self.source_id_segment(source_id)}.json"
 
     def run_record_path(self, job_id: str) -> Path:
         return self.runs_root / f"{job_id}.json"

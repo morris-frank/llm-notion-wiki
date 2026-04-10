@@ -101,7 +101,7 @@ def _seed_page_metadata(title: str, page_type: str, slug: str, scope_context: Sc
             ("review_required", False),
             ("scope", scope_context.scope),
             ("owner", scope_context.owner_or_null),
-            ("review_state", "unreviewed" if scope_context.scope == "shared" else "n/a"),
+            ("review_state", "unreviewed" if scope_context.scope == "shared" else "n_a"),
             ("promotion_origin", None),
         ]
     )
@@ -357,7 +357,7 @@ def _merge_metadata(
     metadata["scope"] = scope_context.scope
     metadata["owner"] = scope_context.owner_or_null
     if "review_state" not in metadata:
-        metadata["review_state"] = "unreviewed" if scope_context.scope == "shared" else "n/a"
+        metadata["review_state"] = "unreviewed" if scope_context.scope == "shared" else "n_a"
     if "promotion_origin" not in metadata:
         metadata["promotion_origin"] = None
     source_ids = list(metadata.get("source_ids", []))
@@ -519,7 +519,7 @@ def apply_run_plan(
         metadata["scope"] = scope_context.scope
         metadata["owner"] = scope_context.owner_or_null
         if "review_state" not in metadata:
-            metadata["review_state"] = "unreviewed" if scope_context.scope == "shared" else "n/a"
+            metadata["review_state"] = "unreviewed" if scope_context.scope == "shared" else "n_a"
         if "promotion_origin" not in metadata:
             metadata["promotion_origin"] = None
         source_ids = list(metadata.get("source_ids", []))
