@@ -53,7 +53,7 @@ prompt_yes_no() {
   while true; do
     read -r -p "$prompt $suffix " reply || true
     reply="${reply:-}"
-    case "${reply,,}" in
+    case "$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]')" in
       "")
         echo "$default"
         return
@@ -119,34 +119,34 @@ echo "Feature selection"
 echo
 echo "Select which optional capabilities to enable:"
 echo "  FEATURE_SOURCE_ENRICHMENT  - extra source metadata: checksums, tags, language, versioning, freshness"
-FEATURE_SOURCE_ENRICHMENT="$(prompt_yes_no "Enable source enrichment?" 1)"
+FEATURE_SOURCE_ENRICHMENT="$(prompt_yes_no "Enable source enrichment?" 0)"
 echo
 echo "  FEATURE_SOURCE_DIAGNOSTICS - parsing/debug artefacts and source error fields"
-FEATURE_SOURCE_DIAGNOSTICS="$(prompt_yes_no "Enable source diagnostics?" 1)"
+FEATURE_SOURCE_DIAGNOSTICS="$(prompt_yes_no "Enable source diagnostics?" 0)"
 echo
 echo "  FEATURE_EDITORIAL_WORKFLOW - human review and publication control fields"
-FEATURE_EDITORIAL_WORKFLOW="$(prompt_yes_no "Enable editorial workflow?" 1)"
+FEATURE_EDITORIAL_WORKFLOW="$(prompt_yes_no "Enable editorial workflow?" 0)"
 echo
 echo "  FEATURE_FRESHNESS          - regeneration, stale-state, and refresh tracking"
-FEATURE_FRESHNESS="$(prompt_yes_no "Enable freshness management?" 1)"
+FEATURE_FRESHNESS="$(prompt_yes_no "Enable freshness management?" 0)"
 echo
 echo "  FEATURE_CONFIDENCE         - confidence scores and conflict markers on wiki output"
-FEATURE_CONFIDENCE="$(prompt_yes_no "Enable confidence/conflict fields?" 0)"
+FEATURE_CONFIDENCE="$(prompt_yes_no "Enable confidence/conflict fields?" 1)"
 echo
 echo "  FEATURE_LINK_GRAPH         - relations between sources, wiki pages, and jobs"
 FEATURE_LINK_GRAPH="$(prompt_yes_no "Enable link graph relations?" 1)"
 echo
 echo "  FEATURE_ENTITIES           - Entities data source and entity relations"
-FEATURE_ENTITIES="$(prompt_yes_no "Enable entities data source?" 0)"
+FEATURE_ENTITIES="$(prompt_yes_no "Enable entities data source?" 1)"
 echo
 echo "  FEATURE_QUESTIONS          - Questions data source and question-driven jobs"
-FEATURE_QUESTIONS="$(prompt_yes_no "Enable questions data source?" 0)"
+FEATURE_QUESTIONS="$(prompt_yes_no "Enable questions data source?" 1)"
 echo
 echo "  FEATURE_JOB_CONTROL        - retries, locking, worker metadata, and error/audit fields"
 FEATURE_JOB_CONTROL="$(prompt_yes_no "Enable advanced job control?" 1)"
 echo
 echo "  FEATURE_POLICY_ENGINE      - prompt/template/policy pointers and job-policy relation"
-FEATURE_POLICY_ENGINE="$(prompt_yes_no "Enable policy engine fields?" 1)"
+FEATURE_POLICY_ENGINE="$(prompt_yes_no "Enable policy engine fields?" 0)"
 
 echo
 echo "Required inputs"
