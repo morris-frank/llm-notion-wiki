@@ -318,9 +318,13 @@ echo "# Verifying Wiki Pages schema"
 
 for p in \
   "Wiki Title" "Wiki Slug" "Wiki Type" "Wiki Status" \
-  "Canonical Markdown Path" "Summary"
+  "Canonical Markdown Path" "Summary" "Confidence Level"
 do
   assert_prop_present "$WIKI_JSON" "$p"
+done
+
+for option in "source" "concept" "synthesis" "index" "changelog"; do
+  check_select_option_present "$WIKI_JSON" "Wiki Type" "$option"
 done
 
 if [[ "$FEATURE_SOURCE_ENRICHMENT" == "1" ]]; then
@@ -398,7 +402,7 @@ fi
 
 if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
   for p in \
-    "Trigger Type" "Trigger Event ID" "Priority" "Attempt Count" \
+    "Trigger Type" "Trigger Event ID" "Priority" "Job Phase" "Attempt Count" \
     "Max Attempts" "Started At" "Finished At" "Duration Ms" \
     "Worker Name" "Idempotency Key" "Error Class" "Error Message" \
     "Retry After Seconds" "Output Pointer" "Diff Pointer" "Locked"
@@ -407,7 +411,7 @@ if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
   done
 else
   for p in \
-    "Trigger Type" "Trigger Event ID" "Priority" "Attempt Count" \
+    "Trigger Type" "Trigger Event ID" "Priority" "Job Phase" "Attempt Count" \
     "Max Attempts" "Started At" "Finished At" "Duration Ms" \
     "Worker Name" "Idempotency Key" "Error Class" "Error Message" \
     "Retry After Seconds" "Output Pointer" "Diff Pointer" "Locked"
@@ -515,12 +519,16 @@ assert_prop_type "$WIKI_JSON" "Wiki Type" "select"
 assert_prop_type "$WIKI_JSON" "Wiki Status" "select"
 assert_prop_type "$WIKI_JSON" "Canonical Markdown Path" "rich_text"
 assert_prop_type "$WIKI_JSON" "Summary" "rich_text"
+assert_prop_type "$WIKI_JSON" "Confidence Level" "select"
 
 assert_prop_type "$JOBS_JSON" "Job Title" "title"
 assert_prop_type "$JOBS_JSON" "Job ID" "rich_text"
 assert_prop_type "$JOBS_JSON" "Job Type" "select"
 assert_prop_type "$JOBS_JSON" "Job Status" "select"
 assert_prop_type "$JOBS_JSON" "Queue Timestamp" "date"
+if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
+  assert_prop_type "$JOBS_JSON" "Job Phase" "select"
+fi
 
 assert_prop_type "$POLICIES_JSON" "Policy Name" "title"
 assert_prop_type "$POLICIES_JSON" "Policy Version" "rich_text"
@@ -618,7 +626,7 @@ if [[ -n "${JOB_PAGE_ID:-}" ]]; then
     assert_page_has_prop "$JOB_PAGE_JSON" "$p"
   done
   if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
-    for p in "Trigger Type" "Priority" "Attempt Count" "Max Attempts" "Worker Name" "Idempotency Key" "Locked"; do
+    for p in "Trigger Type" "Priority" "Job Phase" "Attempt Count" "Max Attempts" "Worker Name" "Idempotency Key" "Locked"; do
       assert_page_has_prop "$JOB_PAGE_JSON" "$p"
     done
   fi

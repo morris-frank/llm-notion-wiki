@@ -240,12 +240,11 @@ add_prop "$WIKI_PROPS" "Wiki Title" '{ "title": {} }'
 add_prop "$WIKI_PROPS" "Wiki Slug" '{ "rich_text": {} }'
 add_prop "$WIKI_PROPS" "Wiki Type" '{
   "select": { "options": [
-    { "name": "entity", "color": "blue" },
+    { "name": "source", "color": "green" },
     { "name": "concept", "color": "purple" },
-    { "name": "source_summary", "color": "green" },
-    { "name": "comparison", "color": "orange" },
     { "name": "synthesis", "color": "pink" },
-    { "name": "faq", "color": "yellow" }
+    { "name": "index", "color": "blue" },
+    { "name": "changelog", "color": "brown" }
   ] }
 }'
 add_prop "$WIKI_PROPS" "Wiki Status" '{
@@ -257,6 +256,13 @@ add_prop "$WIKI_PROPS" "Wiki Status" '{
 }'
 add_prop "$WIKI_PROPS" "Canonical Markdown Path" '{ "rich_text": {} }'
 add_prop "$WIKI_PROPS" "Summary" '{ "rich_text": {} }'
+add_prop "$WIKI_PROPS" "Confidence Level" '{
+  "select": { "options": [
+    { "name": "high", "color": "green" },
+    { "name": "medium", "color": "yellow" },
+    { "name": "low", "color": "red" }
+  ] }
+}'
 
 if [[ "$FEATURE_SOURCE_ENRICHMENT" == "1" ]]; then
   add_prop "$WIKI_PROPS" "Published URL" '{ "url": {} }'
@@ -343,6 +349,14 @@ if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
       { "name": "high", "color": "orange" },
       { "name": "normal", "color": "blue" },
       { "name": "low", "color": "gray" }
+    ] }
+  }'
+  add_prop "$JOBS_PROPS" "Job Phase" '{
+    "select": { "options": [
+      { "name": "running", "color": "blue" },
+      { "name": "validating_plan", "color": "yellow" },
+      { "name": "applying_changes", "color": "orange" },
+      { "name": "syncing_state", "color": "green" }
     ] }
   }'
   add_prop "$JOBS_PROPS" "Attempt Count" '{ "number": { "format": "number" } }'
