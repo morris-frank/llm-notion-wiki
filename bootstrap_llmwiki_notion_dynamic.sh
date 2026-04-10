@@ -193,6 +193,7 @@ add_prop "$SOURCES_PROPS" "Source Type" '{
   ] }
 }'
 add_prop "$SOURCES_PROPS" "Canonical URL" '{ "url": {} }'
+add_prop "$SOURCES_PROPS" "Target Notion Page ID" '{ "rich_text": {} }'
 add_prop "$SOURCES_PROPS" "Trust Level" '{
   "select": { "options": [
     { "name": "primary", "color": "green" },

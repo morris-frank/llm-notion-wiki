@@ -19,9 +19,10 @@ class FakeRepository:
         self.updated_source_ingest: dict[str, str] | None = None
         self.updated_source_summary: str | None = None
         self.succeeded_jobs: list[str] = []
-        self.failed_jobs: list[tuple[str, str, str]] = []
+        self.failed_jobs: list[tuple[str, str, str, str | None]] = []
         self.phases: list[str] = []
         self.upserted_pages: list[WikiPageMetadata] = []
+        self.upserted_backing_source_page_ids: list[list[str]] = []
 
     def get_source(self, source_page_id: str) -> SourceRecord:
         return self.source
@@ -70,8 +71,12 @@ class FakeRepository:
     def update_job_phase(self, page_id: str, phase: str) -> None:
         self.phases.append(phase)
 
-    def upsert_wiki_page(self, metadata: WikiPageMetadata, *, source_page_id: str, latest_job_page_id: str) -> None:
+    def resolve_backing_source_page_ids(self, source_ids: list[str], *, page_scope_context: ScopeContext) -> list[str]:
+        return [f"page-for-{source_id}" for source_id in source_ids]
+
+    def upsert_wiki_page(self, metadata: WikiPageMetadata, *, backing_source_page_ids: list[str], latest_job_page_id: str) -> None:
         self.upserted_pages.append(metadata)
+        self.upserted_backing_source_page_ids.append(backing_source_page_ids)
 
     def update_source_after_wiki(self, source: SourceRecord, *, source_summary_pointer: str) -> None:
         self.updated_source_summary = source_summary_pointer
@@ -79,11 +84,11 @@ class FakeRepository:
     def mark_job_succeeded(self, page_id: str, *, started_at: str | None, output_pointer: str | None, diff_pointer: str | None) -> None:
         self.succeeded_jobs.append(page_id)
 
-    def mark_job_failed(self, page_id: str, error_class: str, message: str) -> None:
-        self.failed_jobs.append((page_id, error_class, message))
+    def mark_job_failed(self, page_id: str, error_class: str, message: str, *, output_pointer: str | None = None) -> None:
+        self.failed_jobs.append((page_id, error_class, message, output_pointer))
 
     def mark_source_failed(self, source: SourceRecord, message: str) -> None:
-        self.failed_jobs.append((source.page_id, "source", message))
+        self.failed_jobs.append((source.page_id, "source", message, None))
 
     def query_queued_jobs(self) -> list[JobRecord]:
         return []
@@ -237,9 +242,112 @@ class WorkerFlowTests(unittest.TestCase):
             self.assertTrue((root / "state" / "runs" / "users" / "alice" / "job_update.json").exists())
             self.assertTrue((root / "exports" / "diffs" / "users" / "alice" / "job_update.patch").exists())
             self.assertTrue(repository.upserted_pages)
+            self.assertEqual(repository.upserted_backing_source_page_ids[0], ["page-for-src_1"])
             self.assertIsNotNone(repository.updated_source_summary)
             self.assertIn("update-page-id", repository.succeeded_jobs)
             self.assertTrue(all(page.scope == "private" and page.owner == "alice" for page in repository.upserted_pages))
+
+    def test_private_bundle_includes_shared_overlay_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            ensure_owner_scope(root, "alice")
+            shared_index = root / "wiki" / "shared" / "indexes" / "index.md"
+            shared_index.write_text("shared index", encoding="utf-8")
+            shared_manifest = root / "state" / "manifests" / "shared" / "shared_src.json"
+            shared_manifest.write_text(
+                json.dumps(
+                    {
+                        "source_id": "shared_src",
+                        "scope": "shared",
+                        "owner": None,
+                        "checksum": "sha256:shared",
+                        "source_page": "wiki/shared/sources/shared_src.md",
+                        "affected_pages": ["wiki/shared/indexes/index.md"],
+                        "last_job_id": "job_shared",
+                        "last_updated_at": "2026-04-10T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "wiki" / "shared" / "sources" / "shared_src.md").write_text("shared source", encoding="utf-8")
+            source = SourceRecord(
+                page_id="source-page-id",
+                source_id="src_1",
+                source_type="web_page",
+                title="Example Source",
+                canonical_url="https://example.com/source",
+                trust_level="primary",
+                status="queued",
+                scope="private",
+                owner="alice",
+                content_version=1,
+            )
+            repository = FakeRepository(source)
+            fetcher = FakeFetcher(root)
+            worker = Worker(repository=repository, source_fetcher=fetcher, planner=StaticPlanner(response="{}"), wiki_root=root, worker_name="test-worker")
+            fetcher.fetch(source)
+            bundle = worker._build_llm_bundle(
+                JobRecord(
+                    page_id="update-page-id",
+                    job_id="job_update",
+                    job_type="update_wiki",
+                    status="queued",
+                    queue_timestamp=None,
+                    scope="private",
+                    owner="alice",
+                    target_source_page_id=source.page_id,
+                ),
+                source,
+                ScopedPaths(root, source.scope_context),
+                ScopedPaths(root, source.scope_context).source_artifact_dir(source.source_id),
+            )
+            self.assertIn("wiki/shared/indexes/index.md", bundle["existing_pages"])
+
+    def test_invalid_planner_output_persists_failure_run_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            ensure_owner_scope(root, "alice")
+            source = SourceRecord(
+                page_id="source-page-id",
+                source_id="src_1",
+                source_type="web_page",
+                title="Example Source",
+                canonical_url="https://example.com/source",
+                trust_level="primary",
+                status="queued",
+                scope="private",
+                owner="alice",
+                content_version=1,
+            )
+            repository = FakeRepository(source)
+            fetcher = FakeFetcher(root)
+            fetcher.fetch(source)
+            worker = Worker(
+                repository=repository,
+                source_fetcher=fetcher,
+                planner=StaticPlanner(response="not-json"),
+                wiki_root=root,
+                worker_name="test-worker",
+            )
+            update_job = JobRecord(
+                page_id="update-page-id",
+                job_id="job_update",
+                job_type="update_wiki",
+                status="queued",
+                queue_timestamp=None,
+                scope="private",
+                owner="alice",
+                target_source_page_id=source.page_id,
+            )
+            worker.run_job(update_job)
+            record_path = root / "state" / "runs" / "users" / "alice" / "job_update.json"
+            self.assertTrue(record_path.exists())
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["raw_model_output"], "not-json")
+            self.assertEqual(payload["failure"]["error_class"], "validation")
+            self.assertEqual(repository.failed_jobs[-1][0], "update-page-id")
 
 
 if __name__ == "__main__":

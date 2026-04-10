@@ -23,7 +23,7 @@ from .contracts import (
 )
 from .frontmatter import dump_document, parse_document
 from .models import ALLOWED_OP_TYPES, ALLOWED_PAGE_TYPES, Operation, RunPlan, ScopeContext, SectionPatch, WikiPageMetadata
-from .paths import ScopedPaths, page_type_matches_path, scope_root_directories
+from .paths import CHANGELOG_SEED_FILENAME, ScopedPaths, page_type_matches_path, scope_root_directories
 
 
 GENERIC_PAGE_SECTIONS = [

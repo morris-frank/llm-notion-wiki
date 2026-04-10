@@ -244,7 +244,7 @@ echo "# Verifying Sources schema"
 
 # always-on
 for p in \
-  "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" \
+  "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" "Target Notion Page ID" \
   "Trust Level" "Source Status" "Imported At"
 do
   assert_prop_present "$SOURCES_JSON" "$p"
@@ -530,6 +530,7 @@ assert_prop_type "$SOURCES_JSON" "Scope" "select"
 assert_prop_type "$SOURCES_JSON" "Owner" "rich_text"
 assert_prop_type "$SOURCES_JSON" "Source Type" "select"
 assert_prop_type "$SOURCES_JSON" "Canonical URL" "url"
+assert_prop_type "$SOURCES_JSON" "Target Notion Page ID" "rich_text"
 assert_prop_type "$SOURCES_JSON" "Trust Level" "select"
 assert_prop_type "$SOURCES_JSON" "Source Status" "select"
 assert_prop_type "$SOURCES_JSON" "Imported At" "date"
@@ -631,7 +632,7 @@ fi
 
 if [[ -n "${SOURCE_PAGE_ID:-}" ]]; then
   SOURCE_PAGE_JSON="$(api GET "/pages/${SOURCE_PAGE_ID}")"
-  for p in "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" "Trust Level" "Source Status" "Imported At"; do
+  for p in "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" "Target Notion Page ID" "Trust Level" "Source Status" "Imported At"; do
     assert_page_has_prop "$SOURCE_PAGE_JSON" "$p"
   done
   if [[ "$FEATURE_SOURCE_ENRICHMENT" == "1" ]]; then

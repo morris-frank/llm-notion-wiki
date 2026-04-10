@@ -5,10 +5,13 @@ from pathlib import Path
 import unittest
 
 from llmwiki_runtime.models import ScopeContext
+from llmwiki_runtime.paths import ScopedPaths
 from llmwiki_runtime.wiki_ops import (
     apply_run_plan,
     ensure_owner_scope,
     ensure_wiki_root,
+    load_candidate_pages,
+    load_manifest,
     parse_run_plan,
     validate_run_plan,
 )
@@ -139,6 +142,37 @@ class WikiOpsTests(unittest.TestCase):
             validate_run_plan(plan, root=root, scope_context=scope_context)
             with self.assertRaises(ValueError):
                 apply_run_plan(plan, root=root, scope_context=scope_context, source_scope="private")
+
+    def test_rejects_unsafe_owner_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with self.assertRaises(ValueError):
+                ScopedPaths(root, ScopeContext("private", "../../tmp")).wiki_scope_root
+
+    def test_rejects_poisoned_manifest_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            manifest_path = root / "state" / "manifests" / "shared" / "src_1.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(
+                """
+                {
+                  "source_id": "src_1",
+                  "scope": "shared",
+                  "owner": null,
+                  "checksum": "sha256:test",
+                  "source_page": "wiki/shared/sources/src_1.md",
+                  "affected_pages": ["wiki/users/alice/concepts/oops.md"],
+                  "last_job_id": "job_1",
+                  "last_updated_at": "2026-04-10T00:00:00Z"
+                }
+                """,
+                encoding="utf-8",
+            )
+            scoped_paths = ScopedPaths(root, ScopeContext("shared"))
+            with self.assertRaises(ValueError):
+                load_manifest(scoped_paths, "src_1")
 
 
 if __name__ == "__main__":

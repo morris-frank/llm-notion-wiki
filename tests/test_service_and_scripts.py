@@ -96,14 +96,14 @@ class ServiceAndScriptTests(unittest.TestCase):
                 llm_api_key=None,
                 llm_api_base="https://example.com/v1",
                 llm_model=None,
-                notion_webhook_signing_secret=None,
+                notion_webhook_signing_secret="signing-secret",
                 notion_webhook_verification_token="verify-token",
                 log_level="INFO",
             )
             app = ServiceApp(settings=settings, worker=StubWorker())
             body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
-            signature = hmac.new(b"verify-token", body, hashlib.sha256).hexdigest()
-            status, payload = app.handle_webhook(body, {"X-Notion-Signature": signature})
+            signature = hmac.new(b"signing-secret", body, hashlib.sha256).hexdigest()
+            status, payload = app.handle_webhook(body, {"X-Notion-Signature": f"sha256={signature}"})
             self.assertEqual(status, 200)
             self.assertTrue(payload["accepted"])
             self.assertTrue(app.worker.repository.created_jobs)
