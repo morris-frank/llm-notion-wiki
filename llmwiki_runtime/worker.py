@@ -101,6 +101,16 @@ class Worker:
             owner=job.owner,
         )
         started_at = self.repository.claim_job(job, self.worker_name)
+        if started_at is None:
+            log_event(
+                LOGGER,
+                "job_claim_lost",
+                job_id=job.job_id,
+                job_type=job.job_type,
+                scope=job.scope,
+                owner=job.owner,
+            )
+            return
         try:
             if job.job_type == "ingest_source":
                 self._run_ingest_job(job, started_at)
@@ -275,11 +285,17 @@ class Worker:
                     page_scope_context=metadata.scope_context,
                 )
                 metadata_by_path[relative_path] = (metadata, backing_source_page_ids)
+            source_page_path = scoped_paths.relative(scoped_paths.source_page_path(source.source_id))
+            canonical_source_page_exists = source_page_path in state or (self.wiki_root / source_page_path).exists()
+            if not canonical_source_page_exists:
+                raise ValueError(
+                    f"Canonical source page {source_page_path} must exist after update_wiki; "
+                    "first successful runs may not be no_op"
+                )
             self.repository.update_job_phase(job.page_id, "applying_changes")
             failure_stage = "applying_changes"
             changed = changed_files(plan, state, root=self.wiki_root)
             atomic_write_files(changed, root=self.wiki_root)
-            source_page_path = scoped_paths.relative(scoped_paths.source_page_path(source.source_id))
             diff_path = write_diff(job.job_id, changed=changed, scoped_paths=scoped_paths)
             manifest_path = update_manifest(
                 scoped_paths=scoped_paths,

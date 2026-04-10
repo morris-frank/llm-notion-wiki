@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 from typing import Any
+from uuid import uuid4
 
 from .models import JobRecord, ScopeContext, SourceRecord, WikiPageMetadata
 from .notion import (
@@ -147,18 +148,27 @@ class NotionRepository:
         )
         return [self._job_from_page(page) for page in result.get("results", [])]
 
-    def claim_job(self, job: JobRecord, worker_name: str) -> str:
+    def claim_job(self, job: JobRecord, worker_name: str) -> str | None:
         started_at = now_iso()
+        claim_worker_name = f"{worker_name}#{uuid4().hex[:8]}"
         props = {
             "Job Status": select_property("running"),
             "Job Phase": select_property("running"),
             "Started At": date_property(started_at),
             "Locked": checkbox_property(True),
-            "Worker Name": rich_text_property(worker_name),
+            "Worker Name": rich_text_property(claim_worker_name),
             "Scope": select_property(job.scope),
             "Owner": rich_text_property(job.owner or ""),
         }
         self.client.update_page(job.page_id, props)
+        page = self.client.retrieve_page(job.page_id)
+        if (
+            _select(page, "Job Status") != "running"
+            or not _checkbox(page, "Locked")
+            or _rich_text(page, "Worker Name") != claim_worker_name
+            or _date(page, "Started At") != started_at
+        ):
+            return None
         job.properties.setdefault("Started At", {"date": {"start": started_at}})
         return started_at
 

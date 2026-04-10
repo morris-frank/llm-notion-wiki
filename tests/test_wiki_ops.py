@@ -143,6 +143,47 @@ class WikiOpsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 apply_run_plan(plan, root=root, scope_context=scope_context, source_scope="private")
 
+    def test_private_page_rejects_other_owner_path_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            ensure_owner_scope(root, "alice")
+            plan = parse_run_plan(
+                """
+                {
+                  "schema_version": "v1",
+                  "job_id": "job_1",
+                  "source_id": "src_1",
+                  "run_mode": "apply",
+                  "summary": {
+                    "decision": "mixed",
+                    "reason": "bad private reference",
+                    "review_required": false,
+                    "confidence": "medium"
+                  },
+                  "touched_paths": ["wiki/users/alice/concepts/leak.md"],
+                  "operations": [
+                    {
+                      "op": "create_file",
+                      "path": "wiki/users/alice/concepts/leak.md",
+                      "page_type": "concept",
+                      "reason": "bad",
+                      "content": "---\\ntitle: \\"Leak\\"\\npage_type: \\"concept\\"\\nslug: \\"leak\\"\\nstatus: \\"draft\\"\\nupdated_at: \\"2026-04-10T00:00:00Z\\"\\nsource_ids:\\n  - \\"src_1\\"\\nsource_scope:\\n  - \\"private\\"\\nentity_keys: []\\nconcept_keys: []\\nconfidence: \\"medium\\"\\nreview_required: false\\nscope: \\"private\\"\\nowner: \\"alice\\"\\nreview_state: \\"n_a\\"\\npromotion_origin: null\\n---\\n# Leak\\n\\n## One-line summary\\ntext\\n\\n## Key points\\n- Reference wiki/users/bob/concepts/secret.md\\n\\n## Details\\nSee raw/users/bob/canonical/src_secret/source.md\\n\\n## Evidence\\n- [S:src_1] text\\n\\n## Open questions\\n\\n## Related pages\\n\\n## Change log\\n- created\\n\\n## Sources\\n- [S:src_1] Example\\n"
+                    }
+                  ],
+                  "manifest_update": {
+                    "source_page": "wiki/users/alice/sources/src_1.md",
+                    "affected_pages": ["wiki/users/alice/concepts/leak.md"]
+                  },
+                  "warnings": []
+                }
+                """
+            )
+            scope_context = ScopeContext("private", "alice")
+            validate_run_plan(plan, root=root, scope_context=scope_context)
+            with self.assertRaises(ValueError):
+                apply_run_plan(plan, root=root, scope_context=scope_context, source_scope="private")
+
     def test_rejects_unsafe_owner_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

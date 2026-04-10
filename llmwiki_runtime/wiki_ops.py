@@ -23,7 +23,7 @@ from .contracts import (
 )
 from .frontmatter import dump_document, parse_document
 from .models import ALLOWED_OP_TYPES, ALLOWED_PAGE_TYPES, Operation, RunPlan, ScopeContext, SectionPatch, WikiPageMetadata
-from .paths import CHANGELOG_SEED_FILENAME, ScopedPaths, page_type_matches_path, scope_root_directories
+from .paths import CHANGELOG_SEED_FILENAME, ScopedPaths, page_type_matches_path, safe_path_segment, scope_root_directories
 
 
 GENERIC_PAGE_SECTIONS = [
@@ -419,6 +419,11 @@ def validate_resulting_document(
         raise ValueError(f"Shared pages may not cite private sources in {path}")
     if scope_context.scope == "shared" and ("raw/users/" in content or "wiki/users/" in content):
         raise ValueError(f"Shared pages may not reference private paths in {path}")
+    if scope_context.scope == "private":
+        owner_segment = safe_path_segment(scope_context.owner_or_null or "", label="owner")
+        for matched_owner in re.findall(r"(?:raw|wiki)/users/([^/]+)/", content):
+            if matched_owner != owner_segment:
+                raise ValueError(f"Private pages may not reference other owners in {path}")
     for section in _required_sections(page_type):
         if section not in parsed.body:
             raise ValueError(f"Missing required section {section} in {path}")

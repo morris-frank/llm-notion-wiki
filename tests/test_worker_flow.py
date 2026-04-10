@@ -23,6 +23,7 @@ class FakeRepository:
         self.phases: list[str] = []
         self.upserted_pages: list[WikiPageMetadata] = []
         self.upserted_backing_source_page_ids: list[list[str]] = []
+        self.claim_result: str | None = "2026-04-10T00:00:00Z"
 
     def get_source(self, source_page_id: str) -> SourceRecord:
         return self.source
@@ -55,7 +56,7 @@ class FakeRepository:
         )
 
     def claim_job(self, job: JobRecord, worker_name: str) -> str:
-        return "2026-04-10T00:00:00Z"
+        return self.claim_result
 
     def mark_source_fetching(self, source: SourceRecord) -> None:
         return
@@ -348,6 +349,115 @@ class WorkerFlowTests(unittest.TestCase):
             self.assertEqual(payload["raw_model_output"], "not-json")
             self.assertEqual(payload["failure"]["error_class"], "validation")
             self.assertEqual(repository.failed_jobs[-1][0], "update-page-id")
+
+    def test_lost_job_claim_skips_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            source = SourceRecord(
+                page_id="source-page-id",
+                source_id="src_1",
+                source_type="web_page",
+                title="Example Source",
+                canonical_url="https://example.com/source",
+                trust_level="primary",
+                status="queued",
+                scope="shared",
+            )
+            repository = FakeRepository(source)
+            repository.claim_result = None
+            worker = Worker(
+                repository=repository,
+                source_fetcher=FakeFetcher(root),
+                planner=None,
+                wiki_root=root,
+                worker_name="test-worker",
+            )
+            worker.run_job(
+                JobRecord(
+                    page_id="ingest-page-id",
+                    job_id="job_ingest",
+                    job_type="ingest_source",
+                    status="queued",
+                    queue_timestamp=None,
+                    scope="shared",
+                    owner=None,
+                    target_source_page_id=source.page_id,
+                )
+            )
+            self.assertIsNone(repository.updated_source_ingest)
+            self.assertFalse(repository.failed_jobs)
+            self.assertFalse(repository.succeeded_jobs)
+
+    def test_first_run_no_op_fails_without_canonical_source_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            source = SourceRecord(
+                page_id="source-page-id",
+                source_id="src_1",
+                source_type="web_page",
+                title="Example Source",
+                canonical_url="https://example.com/source",
+                trust_level="primary",
+                status="queued",
+                scope="shared",
+                content_version=1,
+            )
+            repository = FakeRepository(source)
+            fetcher = FakeFetcher(root)
+            fetcher.fetch(source)
+            planner = StaticPlanner(
+                response="""
+                {
+                  "schema_version": "v1",
+                  "job_id": "job_update",
+                  "source_id": "src_1",
+                  "run_mode": "apply",
+                  "summary": {
+                    "decision": "no_op",
+                    "reason": "Nothing changed.",
+                    "review_required": false,
+                    "confidence": "medium"
+                  },
+                  "touched_paths": [],
+                  "operations": [
+                    {
+                      "op": "no_op",
+                      "path": "wiki/shared/sources/src_1.md",
+                      "page_type": "source",
+                      "reason": "No change required."
+                    }
+                  ],
+                  "manifest_update": {
+                    "source_page": "wiki/shared/sources/src_1.md",
+                    "affected_pages": []
+                  },
+                  "warnings": []
+                }
+                """
+            )
+            worker = Worker(
+                repository=repository,
+                source_fetcher=fetcher,
+                planner=planner,
+                wiki_root=root,
+                worker_name="test-worker",
+            )
+            worker.run_job(
+                JobRecord(
+                    page_id="update-page-id",
+                    job_id="job_update",
+                    job_type="update_wiki",
+                    status="queued",
+                    queue_timestamp=None,
+                    scope="shared",
+                    owner=None,
+                    target_source_page_id=source.page_id,
+                )
+            )
+            self.assertEqual(repository.failed_jobs[-1][0], "update-page-id")
+            self.assertIsNone(repository.updated_source_summary)
 
 
 if __name__ == "__main__":
