@@ -277,7 +277,11 @@ def validate_run_plan(plan: RunPlan, *, root: Path, scope_context: ScopeContext)
     source_page = plan.manifest_update.get("source_page")
     if not isinstance(source_page, str):
         raise ValueError("manifest_update.source_page must be a string")
-    _validate_relative_wiki_path(source_page, "source", scope_context)
+    source_page_type = _page_type_for_path(source_page, scope_context)
+    requires_source_page = any(op.page_type == "source" for op in plan.operations)
+    if requires_source_page and source_page_type != "source":
+        raise ValueError("manifest_update.source_page must be a source page for source-maintenance runs")
+    _validate_relative_wiki_path(source_page, source_page_type, scope_context)
     for path in affected_pages:
         if not isinstance(path, str):
             raise ValueError("manifest_update.affected_pages entries must be strings")
@@ -346,8 +350,8 @@ def _required_sections(page_type: str) -> list[str]:
 def _merge_metadata(
     document_text: str,
     *,
-    source_id: str,
-    source_scope: str,
+    current_source_id: str | None,
+    current_source_scope: str | None,
     scope_context: ScopeContext,
     now: str,
 ) -> tuple[OrderedDict[str, object], str]:
@@ -361,12 +365,12 @@ def _merge_metadata(
     if "promotion_origin" not in metadata:
         metadata["promotion_origin"] = None
     source_ids = list(metadata.get("source_ids", []))
-    if source_id not in source_ids:
-        source_ids.append(source_id)
+    if current_source_id and current_source_id not in source_ids:
+        source_ids.append(current_source_id)
     metadata["source_ids"] = source_ids
     source_scopes = list(metadata.get("source_scope", []))
-    if source_scope not in source_scopes:
-        source_scopes.append(source_scope)
+    if current_source_scope and current_source_scope not in source_scopes:
+        source_scopes.append(current_source_scope)
     metadata["source_scope"] = source_scopes
     return metadata, parsed.body
 
@@ -376,8 +380,8 @@ def validate_resulting_document(
     content: str,
     *,
     page_type: str,
-    source_id: str,
-    source_scope: str,
+    current_source_id: str | None,
+    current_source_scope: str | None,
     scope_context: ScopeContext,
 ) -> None:
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
@@ -410,10 +414,10 @@ def validate_resulting_document(
         raise ValueError(f"Frontmatter scope mismatch in {path}")
     if metadata["owner"] != scope_context.owner_or_null:
         raise ValueError(f"Frontmatter owner mismatch in {path}")
-    if page_type != "changelog" and source_id not in metadata.get("source_ids", []):
+    if current_source_id and page_type != "changelog" and current_source_id not in metadata.get("source_ids", []):
         raise ValueError(f"Current source_id missing from source_ids in {path}")
     source_scopes = [str(item) for item in metadata.get("source_scope", [])]
-    if source_scope not in source_scopes:
+    if current_source_scope and current_source_scope not in source_scopes:
         raise ValueError(f"Current source scope missing from source_scope in {path}")
     if scope_context.scope == "shared" and any(item != "shared" for item in source_scopes):
         raise ValueError(f"Shared pages may not cite private sources in {path}")
@@ -440,8 +444,14 @@ def apply_run_plan(
     *,
     root: Path,
     scope_context: ScopeContext,
-    source_scope: str,
+    current_source_id: str | None = None,
+    current_source_scope: str | None = None,
+    source_scope: str | None = None,
 ) -> dict[str, str]:
+    if current_source_scope is None:
+        current_source_scope = source_scope
+    if current_source_id is None and current_source_scope is not None:
+        current_source_id = plan.source_id
     now = utcnow_iso()
     state: dict[str, str] = {}
     for path in plan.touched_paths:
@@ -456,8 +466,8 @@ def apply_run_plan(
                 raise ValueError(f"create_file requires content for {op.path}")
             metadata, body = _merge_metadata(
                 op.content,
-                source_id=plan.source_id,
-                source_scope=source_scope,
+                current_source_id=current_source_id,
+                current_source_scope=current_source_scope,
                 scope_context=scope_context,
                 now=now,
             )
@@ -466,8 +476,8 @@ def apply_run_plan(
                 op.path,
                 new_content,
                 page_type=op.page_type,
-                source_id=plan.source_id,
-                source_scope=source_scope,
+                current_source_id=current_source_id,
+                current_source_scope=current_source_scope,
                 scope_context=scope_context,
             )
             state[op.path] = new_content
@@ -479,8 +489,8 @@ def apply_run_plan(
             current = current.rstrip() + "\n" + op.content.rstrip() + "\n"
             metadata, body = _merge_metadata(
                 current,
-                source_id=plan.source_id,
-                source_scope=source_scope,
+                current_source_id=current_source_id,
+                current_source_scope=current_source_scope,
                 scope_context=scope_context,
                 now=now,
             )
@@ -489,8 +499,8 @@ def apply_run_plan(
                 op.path,
                 new_content,
                 page_type=op.page_type,
-                source_id=plan.source_id,
-                source_scope=source_scope,
+                current_source_id=current_source_id,
+                current_source_scope=current_source_scope,
                 scope_context=scope_context,
             )
             state[op.path] = new_content
@@ -528,20 +538,20 @@ def apply_run_plan(
         if "promotion_origin" not in metadata:
             metadata["promotion_origin"] = None
         source_ids = list(metadata.get("source_ids", []))
-        if op.page_type != "changelog" and plan.source_id not in source_ids:
-            source_ids.append(plan.source_id)
+        if current_source_id and op.page_type != "changelog" and current_source_id not in source_ids:
+            source_ids.append(current_source_id)
         metadata["source_ids"] = source_ids
         source_scopes = list(metadata.get("source_scope", []))
-        if source_scope not in source_scopes:
-            source_scopes.append(source_scope)
+        if current_source_scope and current_source_scope not in source_scopes:
+            source_scopes.append(current_source_scope)
         metadata["source_scope"] = source_scopes
         new_content = dump_document(metadata, rebuilt_body)
         validate_resulting_document(
             op.path,
             new_content,
             page_type=op.page_type,
-            source_id=plan.source_id,
-            source_scope=source_scope,
+            current_source_id=current_source_id,
+            current_source_scope=current_source_scope,
             scope_context=scope_context,
         )
         state[op.path] = new_content
@@ -694,6 +704,19 @@ def _load_scope_candidate_paths(scoped_paths: ScopedPaths, source_id: str | None
     return candidates
 
 
+def load_scope_pages(scoped_paths: ScopedPaths) -> dict[str, str | None]:
+    output: dict[str, str | None] = {}
+    for absolute in sorted(scoped_paths.wiki_scope_root.rglob("*.md")):
+        output[scoped_paths.relative(absolute)] = absolute.read_text(encoding="utf-8")
+    for default_path in (
+        scoped_paths.relative(scoped_paths.index_page_path()),
+        scoped_paths.relative(scoped_paths.synthesis_page_path()),
+        scoped_paths.relative(scoped_paths.changelog_page_path()),
+    ):
+        output.setdefault(default_path, None if not (scoped_paths.root / default_path).exists() else (scoped_paths.root / default_path).read_text(encoding="utf-8"))
+    return output
+
+
 def load_shared_overlay_pages(root: Path) -> dict[str, str | None]:
     shared_paths = ScopedPaths(root, ScopeContext("shared"))
     candidates = _load_scope_candidate_paths(shared_paths, source_id=None, manifest=None)
@@ -735,9 +758,11 @@ def derive_wiki_page_metadata(path: str, content: str) -> WikiPageMetadata:
         review_required=bool(parsed.metadata["review_required"]),
         source_ids=[str(item) for item in parsed.metadata.get("source_ids", [])],
         source_scope=[str(item) for item in parsed.metadata.get("source_scope", [])],
+        entity_keys=[str(item) for item in parsed.metadata.get("entity_keys", [])],
         scope=str(parsed.metadata["scope"]),
         owner=parsed.metadata.get("owner"),
         review_state=str(parsed.metadata["review_state"]),
         promotion_origin=parsed.metadata.get("promotion_origin"),
         summary=summary[0] if summary else "",
+        entity_type=parsed.metadata.get("entity_type"),
     )

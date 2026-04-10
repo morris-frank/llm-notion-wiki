@@ -4,6 +4,7 @@ import hashlib
 import hmac
 from pathlib import Path
 import tempfile
+from urllib import error
 import unittest
 
 from llmwiki_runtime.config import Settings
@@ -14,6 +15,7 @@ from llmwiki_runtime.service import ServiceApp
 class StubRepository:
     def __init__(self) -> None:
         self.created_jobs: list[tuple[str, str, ScopeContext]] = []
+        self.raise_on_get = False
         self.source = type(
             "Source",
             (),
@@ -33,6 +35,8 @@ class StubRepository:
         )()
 
     def get_source(self, source_page_id: str):
+        if self.raise_on_get:
+            raise error.HTTPError("https://example.com", 404, "missing", {}, None)
         return self.source
 
     def active_policy_page_id(self, scope_context: ScopeContext | None = None) -> str:
@@ -77,30 +81,33 @@ class StubWorker:
         )()
 
 
+def _settings(tmpdir: str) -> Settings:
+    return Settings(
+        notion_token="token",
+        notion_version="2026-03-11",
+        notion_api_base="https://api.notion.com/v1",
+        control_db_id=None,
+        sources_data_source_id="sources",
+        wiki_data_source_id="wiki",
+        jobs_data_source_id="jobs",
+        policies_data_source_id="policies",
+        wiki_root=Path(tmpdir),
+        worker_name="worker",
+        poll_interval_seconds=5,
+        admin_api_key=None,
+        llm_api_key=None,
+        llm_api_base="https://example.com/v1",
+        llm_model=None,
+        notion_webhook_signing_secret="signing-secret",
+        notion_webhook_verification_token="verify-token",
+        log_level="INFO",
+    )
+
+
 class ServiceAndScriptTests(unittest.TestCase):
     def test_webhook_signature_and_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            settings = Settings(
-                notion_token="token",
-                notion_version="2026-03-11",
-                notion_api_base="https://api.notion.com/v1",
-                control_db_id=None,
-                sources_data_source_id="sources",
-                wiki_data_source_id="wiki",
-                jobs_data_source_id="jobs",
-                policies_data_source_id="policies",
-                wiki_root=Path(tmpdir),
-                worker_name="worker",
-                poll_interval_seconds=5,
-                admin_api_key=None,
-                llm_api_key=None,
-                llm_api_base="https://example.com/v1",
-                llm_model=None,
-                notion_webhook_signing_secret="signing-secret",
-                notion_webhook_verification_token="verify-token",
-                log_level="INFO",
-            )
-            app = ServiceApp(settings=settings, worker=StubWorker())
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
             body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
             signature = hmac.new(b"signing-secret", body, hashlib.sha256).hexdigest()
             status, payload = app.handle_webhook(body, {"X-Notion-Signature": f"sha256={signature}"})
@@ -111,6 +118,51 @@ class ServiceAndScriptTests(unittest.TestCase):
             self.assertEqual(scope_context.scope, "private")
             self.assertEqual(scope_context.owner, "alice")
             self.assertIn(":private:alice:", key)
+
+    def test_webhook_trigger_regeneration_enqueues_update_wiki(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
+            app.worker.repository.source.trigger_regeneration = True
+            body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
+            signature = hmac.new(b"signing-secret", body, hashlib.sha256).hexdigest()
+            status, payload = app.handle_webhook(body, {"X-Notion-Signature": f"sha256={signature}"})
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["accepted"])
+            self.assertEqual(app.worker.repository.created_jobs[-1][0], "update_wiki")
+
+    def test_webhook_rejects_invalid_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
+            body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
+            status, payload = app.handle_webhook(body, {"X-Notion-Signature": "sha256=bad"})
+            self.assertEqual(status, 401)
+            self.assertEqual(payload["error"], "invalid signature")
+
+    def test_webhook_accepts_verification_handshake(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
+            status, payload = app.handle_webhook(b'{"verification_token":"verify-token"}', {})
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+
+    def test_webhook_non_page_entity_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
+            body = b'{"type":"page.properties_updated","entity":{"id":"block-id","type":"block"}}'
+            signature = hmac.new(b"signing-secret", body, hashlib.sha256).hexdigest()
+            status, payload = app.handle_webhook(body, {"X-Notion-Signature": f"sha256={signature}"})
+            self.assertEqual(status, 200)
+            self.assertFalse(payload["accepted"])
+
+    def test_webhook_unreadable_page_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())
+            app.worker.repository.raise_on_get = True
+            body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
+            signature = hmac.new(b"signing-secret", body, hashlib.sha256).hexdigest()
+            status, payload = app.handle_webhook(body, {"X-Notion-Signature": f"sha256={signature}"})
+            self.assertEqual(status, 200)
+            self.assertFalse(payload["accepted"])
 
     def test_scripts_include_scope_contract(self) -> None:
         repo_root = Path(__file__).resolve().parent.parent
@@ -125,7 +177,8 @@ class ServiceAndScriptTests(unittest.TestCase):
         self.assertIn("Policy Target Scope", bootstrap)
         self.assertIn("Scope", verify)
         self.assertIn("Owner", verify)
-        self.assertIn("Enable entities data source?\" 0", setup)
+        self.assertIn("Enable entities data source?\" 1", setup)
+        self.assertIn("Enable promotions data source?\" 1", setup)
         self.assertIn("Enable source enrichment?\" 1", setup)
 
 

@@ -24,6 +24,7 @@ set -euo pipefail
 #   JOB_PAGE_ID
 #   ENTITIES_DS_ID
 #   QUESTIONS_DS_ID
+#   PROMOTIONS_DS_ID
 #
 # Feature flags:
 #   FEATURE_SOURCE_ENRICHMENT=1
@@ -34,6 +35,7 @@ set -euo pipefail
 #   FEATURE_LINK_GRAPH=1
 #   FEATURE_ENTITIES=0
 #   FEATURE_QUESTIONS=0
+#   FEATURE_PROMOTIONS=1
 #   FEATURE_JOB_CONTROL=1
 #   FEATURE_POLICY_ENGINE=1
 
@@ -53,8 +55,9 @@ FEATURE_EDITORIAL_WORKFLOW="${FEATURE_EDITORIAL_WORKFLOW:-1}"
 FEATURE_FRESHNESS="${FEATURE_FRESHNESS:-1}"
 FEATURE_CONFIDENCE="${FEATURE_CONFIDENCE:-0}"
 FEATURE_LINK_GRAPH="${FEATURE_LINK_GRAPH:-1}"
-FEATURE_ENTITIES="${FEATURE_ENTITIES:-0}"
-FEATURE_QUESTIONS="${FEATURE_QUESTIONS:-0}"
+FEATURE_ENTITIES="${FEATURE_ENTITIES:-1}"
+FEATURE_QUESTIONS="${FEATURE_QUESTIONS:-1}"
+FEATURE_PROMOTIONS="${FEATURE_PROMOTIONS:-1}"
 FEATURE_JOB_CONTROL="${FEATURE_JOB_CONTROL:-1}"
 FEATURE_POLICY_ENGINE="${FEATURE_POLICY_ENGINE:-1}"
 
@@ -222,6 +225,7 @@ echo
 echo "# Retrieving optional data sources when enabled"
 ENTITIES_JSON=""
 QUESTIONS_JSON=""
+PROMOTIONS_JSON=""
 
 if [[ "$FEATURE_ENTITIES" == "1" ]]; then
   : "${ENTITIES_DS_ID:?FEATURE_ENTITIES=1 but ENTITIES_DS_ID is missing}"
@@ -237,6 +241,14 @@ if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
   assert_eq "$(jq -r '.id' <<<"$QUESTIONS_JSON")" "$QUESTIONS_DS_ID" "Questions data source reachable"
 else
   [[ -z "${QUESTIONS_DS_ID:-}" ]] || warn "QUESTIONS_DS_ID is set while FEATURE_QUESTIONS=0"
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  : "${PROMOTIONS_DS_ID:?FEATURE_PROMOTIONS=1 but PROMOTIONS_DS_ID is missing}"
+  PROMOTIONS_JSON="$(api GET "/data_sources/${PROMOTIONS_DS_ID}")"
+  assert_eq "$(jq -r '.id' <<<"$PROMOTIONS_JSON")" "$PROMOTIONS_DS_ID" "Promotions data source reachable"
+else
+  [[ -z "${PROMOTIONS_DS_ID:-}" ]] || warn "PROMOTIONS_DS_ID is set while FEATURE_PROMOTIONS=0"
 fi
 
 echo
@@ -329,7 +341,7 @@ done
 check_select_option_present "$WIKI_JSON" "Scope" "shared"
 check_select_option_present "$WIKI_JSON" "Scope" "private"
 
-for option in "source" "concept" "synthesis" "index" "changelog"; do
+for option in "source" "concept" "entity" "faq" "question" "synthesis" "index" "changelog"; do
   check_select_option_present "$WIKI_JSON" "Wiki Type" "$option"
 done
 
@@ -415,6 +427,12 @@ else
   check_select_option_absent "$JOBS_JSON" "Job Type" "answer_question"
 fi
 
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  check_select_option_present "$JOBS_JSON" "Job Type" "promote_private"
+else
+  check_select_option_absent "$JOBS_JSON" "Job Type" "promote_private"
+fi
+
 if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
   for p in \
     "Trigger Type" "Trigger Event ID" "Priority" "Job Phase" "Attempt Count" \
@@ -443,6 +461,18 @@ else
   assert_prop_absent "$JOBS_JSON" "Target Wiki Page"
 fi
 
+if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
+  assert_prop_present "$JOBS_JSON" "Target Question"
+else
+  assert_prop_absent "$JOBS_JSON" "Target Question"
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  assert_prop_present "$JOBS_JSON" "Target Promotion"
+else
+  assert_prop_absent "$JOBS_JSON" "Target Promotion"
+fi
+
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
   assert_prop_present "$JOBS_JSON" "Policy Version Ref"
 else
@@ -452,7 +482,7 @@ fi
 echo
 echo "# Verifying Policies schema"
 
-for p in "Policy Name" "Policy Version" "Policy Scope" "Active" "Policy Target Scope" "Policy Owner"; do
+for p in "Policy Name" "Policy Version" "Policy Scope" "Active" "Policy Target Scope" "Policy Owner" "Allowed Page Types" "Question Mode" "Entity Extraction" "Promotion Required For Shared" "Minimum Review State For Shared" "Policy Priority"; do
   assert_prop_present "$POLICIES_JSON" "$p"
 done
 
@@ -516,8 +546,14 @@ if [[ "$FEATURE_ENTITIES" == "1" ]]; then
 fi
 
 if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
-  for p in "Question" "Question ID" "Question Status"; do
+  for p in "Question" "Question ID" "Scope" "Owner" "Question Status" "Answer Page Slug" "Resolution Type" "Latest Job" "Target Wiki Page"; do
     assert_prop_present "$QUESTIONS_JSON" "$p"
+  done
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  for p in "Promotion ID" "Scope" "Owner" "Status" "Decision" "Submitted By" "Reviewed By" "Source Private Page" "Target Shared Pages" "Latest Job"; do
+    assert_prop_present "$PROMOTIONS_JSON" "$p"
   done
 fi
 
@@ -562,6 +598,12 @@ assert_prop_type "$POLICIES_JSON" "Policy Scope" "select"
 assert_prop_type "$POLICIES_JSON" "Active" "checkbox"
 assert_prop_type "$POLICIES_JSON" "Policy Target Scope" "select"
 assert_prop_type "$POLICIES_JSON" "Policy Owner" "rich_text"
+assert_prop_type "$POLICIES_JSON" "Allowed Page Types" "multi_select"
+assert_prop_type "$POLICIES_JSON" "Question Mode" "select"
+assert_prop_type "$POLICIES_JSON" "Entity Extraction" "select"
+assert_prop_type "$POLICIES_JSON" "Promotion Required For Shared" "checkbox"
+assert_prop_type "$POLICIES_JSON" "Minimum Review State For Shared" "select"
+assert_prop_type "$POLICIES_JSON" "Policy Priority" "number"
 
 echo
 echo "# Verifying relation targets when enabled"
@@ -592,6 +634,26 @@ if [[ "$FEATURE_ENTITIES" == "1" ]]; then
   assert_prop_type "$WIKI_JSON" "Related Entities" "relation"
   assert_relation_target "$SOURCES_JSON" "Related Entities" "$ENTITIES_DS_ID"
   assert_relation_target "$WIKI_JSON" "Related Entities" "$ENTITIES_DS_ID"
+fi
+
+if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
+  assert_prop_type "$JOBS_JSON" "Target Question" "relation"
+  assert_relation_target "$JOBS_JSON" "Target Question" "$QUESTIONS_DS_ID"
+  assert_prop_type "$QUESTIONS_JSON" "Latest Job" "relation"
+  assert_prop_type "$QUESTIONS_JSON" "Target Wiki Page" "relation"
+  assert_relation_target "$QUESTIONS_JSON" "Latest Job" "$JOBS_DS_ID"
+  assert_relation_target "$QUESTIONS_JSON" "Target Wiki Page" "$WIKI_DS_ID"
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  assert_prop_type "$JOBS_JSON" "Target Promotion" "relation"
+  assert_relation_target "$JOBS_JSON" "Target Promotion" "$PROMOTIONS_DS_ID"
+  assert_prop_type "$PROMOTIONS_JSON" "Source Private Page" "relation"
+  assert_prop_type "$PROMOTIONS_JSON" "Target Shared Pages" "relation"
+  assert_prop_type "$PROMOTIONS_JSON" "Latest Job" "relation"
+  assert_relation_target "$PROMOTIONS_JSON" "Source Private Page" "$WIKI_DS_ID"
+  assert_relation_target "$PROMOTIONS_JSON" "Target Shared Pages" "$WIKI_DS_ID"
+  assert_relation_target "$PROMOTIONS_JSON" "Latest Job" "$JOBS_DS_ID"
 fi
 
 echo

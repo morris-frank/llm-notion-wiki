@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
 import logging
+from pathlib import Path
 import threading
 from typing import Any
 from urllib import error, parse
@@ -14,6 +15,7 @@ from urllib import error, parse
 from .config import Settings
 from .llm import OpenAICompatiblePlanner
 from .logging_utils import configure_logging, log_event
+from .models import ScopeContext
 from .notion import NotionAPIError, NotionClient
 from .paths import ScopedPaths
 from .repository import NotionRepository
@@ -44,6 +46,9 @@ def build_worker(settings: Settings) -> Worker:
         wiki_data_source_id=settings.wiki_data_source_id,
         jobs_data_source_id=settings.jobs_data_source_id,
         policies_data_source_id=settings.policies_data_source_id,
+        entities_data_source_id=settings.entities_data_source_id,
+        questions_data_source_id=settings.questions_data_source_id,
+        promotions_data_source_id=settings.promotions_data_source_id,
     )
     source_fetcher = SourceFetcher(client, settings.wiki_root)
     return Worker(
@@ -59,6 +64,13 @@ def build_worker(settings: Settings) -> Worker:
 class ServiceApp:
     settings: Settings
     worker: Worker
+
+    def _create_job(self, **kwargs):
+        create_job = self.worker.repository.create_job
+        code = getattr(create_job, "__code__", None)
+        if code is not None and "trigger_type" not in code.co_varnames:
+            kwargs.pop("trigger_type", None)
+        return create_job(**kwargs)
 
     def enqueue_source(self, source_page_id: str) -> dict[str, Any]:
         job = self.worker.enqueue_ingest_job(source_page_id)
@@ -100,6 +112,34 @@ class ServiceApp:
             "owner": job.owner,
         }
 
+    def _webhook_state_dir(self) -> Path:
+        path = self.settings.wiki_root / "state" / "webhook"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _record_webhook_state(self, name: str, payload: dict[str, Any]) -> None:
+        path = self._webhook_state_dir() / f"{name}.json"
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def webhook_status(self) -> dict[str, Any]:
+        last_delivery = None
+        delivery_path = self._webhook_state_dir() / "last_delivery.json"
+        if delivery_path.exists():
+            last_delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
+        verification = None
+        verification_path = self._webhook_state_dir() / "last_verification.json"
+        if verification_path.exists():
+            verification = json.loads(verification_path.read_text(encoding="utf-8"))
+        return {
+            "ready": bool(self.settings.notion_webhook_signing_secret or self.settings.notion_webhook_verification_token),
+            "public_base_url": self.settings.public_base_url,
+            "endpoint": None if not self.settings.public_base_url else f"{self.settings.public_base_url.rstrip('/')}/notion/webhook",
+            "has_signing_secret": bool(self.settings.notion_webhook_signing_secret),
+            "has_verification_token": bool(self.settings.notion_webhook_verification_token),
+            "last_delivery": last_delivery,
+            "last_verification": verification,
+        }
+
     def _signed(self, raw_body: bytes, signature: str | None) -> bool:
         secret = self.settings.notion_webhook_signing_secret or self.settings.notion_webhook_verification_token
         if not secret or not signature:
@@ -118,6 +158,8 @@ class ServiceApp:
         if verification_token:
             if configured_token and verification_token != configured_token:
                 return HTTPStatus.FORBIDDEN, {"error": "verification token mismatch"}
+            verification_payload = {"verified_at": payload.get("timestamp"), "verification_token": verification_token}
+            self._record_webhook_state("last_verification", verification_payload)
             return HTTPStatus.OK, {"ok": True}
         if not (self.settings.notion_webhook_signing_secret or configured_token):
             return HTTPStatus.SERVICE_UNAVAILABLE, {
@@ -130,25 +172,89 @@ class ServiceApp:
         entity = payload.get("entity") or {}
         if entity.get("type") != "page" or not entity.get("id"):
             return HTTPStatus.OK, {"accepted": False, "reason": "event entity is not a page"}
-        try:
-            source = self.worker.repository.get_source(entity["id"])
-        except (NotionAPIError, error.HTTPError):
-            return HTTPStatus.OK, {"accepted": False, "reason": "page is not a readable source row"}
-        if source.properties.get("Source Title") is None:
-            return HTTPStatus.OK, {"accepted": False, "reason": "page is not a source row"}
-        event_class = "trigger_regeneration" if source.trigger_regeneration else "source_update"
-        suffix = source.checksum or source.last_edited_time or str(source.content_version or 0)
-        job_type = "update_wiki" if source.trigger_regeneration else "ingest_source"
-        title_prefix = "Regenerate wiki from" if source.trigger_regeneration else "Ingest"
-        key = f"{source.source_id}:{source.scope}:{source.owner or '-'}:{event_class}:{suffix}"
-        job = self.worker.repository.create_job(
-            job_type=job_type,
-            title=f"{title_prefix} {source.title}",
-            target_source_page_id=source.page_id,
-            idempotency_key=key,
-            scope_context=source.scope_context,
-            policy_page_id=self.worker.repository.active_policy_page_id(source.scope_context),
-        )
+        page = None
+        properties: dict[str, Any] = {}
+        if hasattr(self.worker.repository, "client"):
+            try:
+                page = self.worker.repository.client.retrieve_page(entity["id"])
+            except (NotionAPIError, error.HTTPError):
+                return HTTPStatus.OK, {"accepted": False, "reason": "page is not a readable source row"}
+            properties = page.get("properties", {})
+        if "Source Title" in properties:
+            source = self.worker.repository._source_from_page(page)
+            event_class = "trigger_regeneration" if source.trigger_regeneration else "source_update"
+            suffix = source.checksum or source.last_edited_time or str(source.content_version or 0)
+            job_type = "update_wiki" if source.trigger_regeneration else "ingest_source"
+            title_prefix = "Regenerate wiki from" if source.trigger_regeneration else "Ingest"
+            key = f"{source.source_id}:{source.scope}:{source.owner or '-'}:{event_class}:{suffix}"
+            job = self._create_job(
+                job_type=job_type,
+                title=f"{title_prefix} {source.title}",
+                target_source_page_id=source.page_id,
+                idempotency_key=key,
+                scope_context=source.scope_context,
+                policy_page_id=self.worker.repository.active_policy_page_id(source.scope_context),
+                trigger_type="webhook",
+            )
+        elif "Question" in properties and getattr(self.worker.repository, "questions_data_source_id", None):
+            question = self.worker.repository._question_from_page(page)
+            if question.status == "archived":
+                return HTTPStatus.OK, {"accepted": False, "reason": "question is archived"}
+            key = f"{question.question_id}:{question.scope}:{question.owner or '-'}:answer_question:{question.status}"
+            job = self._create_job(
+                job_type="answer_question",
+                title=f"Answer {question.question[:80]}",
+                target_question_page_id=question.page_id,
+                idempotency_key=key,
+                scope_context=question.scope_context,
+                policy_page_id=self.worker.repository.active_policy_page_id(question.scope_context),
+                trigger_type="webhook",
+            )
+            event_class = "question_update"
+        elif "Promotion ID" in properties and getattr(self.worker.repository, "promotions_data_source_id", None):
+            promotion = self.worker.repository._promotion_from_page(page)
+            if promotion.status != "approved":
+                return HTTPStatus.OK, {"accepted": False, "reason": "promotion is not approved"}
+            key = f"{promotion.promotion_id}:{promotion.scope}:{promotion.owner or '-'}:promote_private:{promotion.status}"
+            job = self._create_job(
+                job_type="promote_private",
+                title=f"Promote {promotion.promotion_id}",
+                target_promotion_page_id=promotion.page_id,
+                idempotency_key=key,
+                scope_context=ScopeContext("shared"),
+                policy_page_id=self.worker.repository.active_policy_page_id(ScopeContext("shared")),
+                trigger_type="webhook",
+            )
+            event_class = "promotion_approved"
+        else:
+            try:
+                source = self.worker.repository.get_source(entity["id"])
+            except (NotionAPIError, error.HTTPError, AttributeError):
+                return HTTPStatus.OK, {"accepted": False, "reason": "page is not a supported control-plane row"}
+            if source.properties.get("Source Title") is None:
+                return HTTPStatus.OK, {"accepted": False, "reason": "page is not a supported control-plane row"}
+            event_class = "trigger_regeneration" if source.trigger_regeneration else "source_update"
+            suffix = source.checksum or source.last_edited_time or str(source.content_version or 0)
+            job_type = "update_wiki" if source.trigger_regeneration else "ingest_source"
+            title_prefix = "Regenerate wiki from" if source.trigger_regeneration else "Ingest"
+            key = f"{source.source_id}:{source.scope}:{source.owner or '-'}:{event_class}:{suffix}"
+            job = self._create_job(
+                job_type=job_type,
+                title=f"{title_prefix} {source.title}",
+                target_source_page_id=source.page_id,
+                idempotency_key=key,
+                scope_context=source.scope_context,
+                policy_page_id=self.worker.repository.active_policy_page_id(source.scope_context),
+                trigger_type="webhook",
+            )
+        delivery = {
+            "received_at": payload.get("timestamp"),
+            "event_type": event_type,
+            "event_class": event_class,
+            "entity_id": entity["id"],
+            "job_id": job.job_id,
+        }
+        self._record_webhook_state("last_delivery", delivery)
         log_event(
             LOGGER,
             "webhook_job_created",
@@ -181,6 +287,9 @@ class LLMWikiRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
             _json_response(self, HTTPStatus.OK, {"status": "ok"})
+            return
+        if self.path == "/notion/webhook/status":
+            _json_response(self, HTTPStatus.OK, self.server.app.webhook_status())
             return
         if self.path.startswith("/admin/jobs"):
             if not self._admin_authorized():

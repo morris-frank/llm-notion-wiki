@@ -89,6 +89,14 @@ class NotionClient:
             suffix = f"?start_cursor={parse.quote(start_cursor)}"
         return self._request("GET", f"/blocks/{block_id}/children{suffix}")
 
+    def page_markdown(self, page_id: str, *, title: str | None = None) -> str:
+        page = self.retrieve_page(page_id)
+        resolved_title = title or plain_text(page.get("properties", {}).get("title", {}).get("title")) or "Untitled"
+        body = _collect_notion_blocks(self, page_id).strip()
+        if body:
+            return f"# {resolved_title}\n\n{body}\n"
+        return f"# {resolved_title}\n"
+
 
 def title_property(value: str) -> dict[str, Any]:
     return {"title": [{"text": {"content": value}}]}
@@ -128,6 +136,12 @@ def plain_text(rich_nodes: list[dict[str, Any]] | None) -> str:
     return "".join(node.get("plain_text", "") for node in rich_nodes)
 
 
+def multi_select_names(options: list[dict[str, Any]] | None) -> list[str]:
+    if not options:
+        return []
+    return [str(option.get("name")) for option in options if option.get("name")]
+
+
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
 
 
@@ -161,3 +175,50 @@ def notion_page_id_from_reference(value: str | None) -> str | None:
     if not match:
         return None
     return normalize_notion_id(match)
+
+
+def _notion_rich_text_to_markdown(rich_text: list[dict[str, Any]] | None) -> str:
+    return plain_text(rich_text)
+
+
+def _block_to_markdown(block: dict[str, Any], indent: int = 0) -> str:
+    block_type = block["type"]
+    data = block.get(block_type, {})
+    text = _notion_rich_text_to_markdown(data.get("rich_text"))
+    prefix = "  " * indent
+    if block_type == "paragraph":
+        return f"{prefix}{text}\n\n" if text else "\n"
+    if block_type == "heading_1":
+        return f"# {text}\n\n"
+    if block_type == "heading_2":
+        return f"## {text}\n\n"
+    if block_type == "heading_3":
+        return f"### {text}\n\n"
+    if block_type == "bulleted_list_item":
+        return f"{prefix}- {text}\n"
+    if block_type == "numbered_list_item":
+        return f"{prefix}1. {text}\n"
+    if block_type == "quote":
+        return f"{prefix}> {text}\n\n"
+    if block_type == "code":
+        language = data.get("language", "text")
+        return f"```{language}\n{text}\n```\n\n"
+    if block_type == "to_do":
+        checked = "x" if data.get("checked") else " "
+        return f"{prefix}- [{checked}] {text}\n"
+    return f"{prefix}{text}\n\n" if text else ""
+
+
+def _collect_notion_blocks(client: NotionClient, block_id: str, indent: int = 0) -> str:
+    markdown_chunks: list[str] = []
+    cursor = None
+    while True:
+        response = client.retrieve_block_children(block_id, start_cursor=cursor)
+        for result in response.get("results", []):
+            markdown_chunks.append(_block_to_markdown(result, indent=indent))
+            if result.get("has_children"):
+                markdown_chunks.append(_collect_notion_blocks(client, result["id"], indent=indent + 1))
+        cursor = response.get("next_cursor")
+        if not response.get("has_more"):
+            break
+    return "".join(markdown_chunks)

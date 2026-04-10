@@ -89,6 +89,9 @@ class ScopedPaths:
         mapping = {
             "source": self.wiki_scope_root / "sources",
             "concept": self.wiki_scope_root / "concepts",
+            "entity": self.wiki_scope_root / "entities",
+            "faq": self.wiki_scope_root / "faq",
+            "question": self.wiki_scope_root / "open_questions",
             "synthesis": self.wiki_scope_root / "synthesis",
             "index": self.wiki_scope_root / INDEX_DIRNAME,
             "changelog": self.wiki_scope_root / INDEX_DIRNAME,
@@ -132,6 +135,9 @@ def scope_root_directories(root: Path, owner: str | None = None) -> list[Path]:
         root / "raw" / "shared" / "archive",
         root / "wiki" / "shared" / "sources",
         root / "wiki" / "shared" / "concepts",
+        root / "wiki" / "shared" / "entities",
+        root / "wiki" / "shared" / "faq",
+        root / "wiki" / "shared" / "open_questions",
         root / "wiki" / "shared" / "synthesis",
         root / "wiki" / "shared" / INDEX_DIRNAME,
         root / "state" / "manifests" / "shared",
@@ -153,6 +159,8 @@ def scope_root_directories(root: Path, owner: str | None = None) -> list[Path]:
                 root / "raw" / "users" / owner_segment / "archive",
                 root / "wiki" / "users" / owner_segment / "sources",
                 root / "wiki" / "users" / owner_segment / "concepts",
+                root / "wiki" / "users" / owner_segment / "faq",
+                root / "wiki" / "users" / owner_segment / "open_questions",
                 root / "wiki" / "users" / owner_segment / "synthesis",
                 root / "wiki" / "users" / owner_segment / INDEX_DIRNAME,
                 root / "state" / "manifests" / "users" / owner_segment,
@@ -179,6 +187,12 @@ def page_type_matches_path(path: str, page_type: str, scope_context: ScopeContex
         return path.startswith(f"{prefix}sources/") and path.endswith(".md")
     if page_type == "concept":
         return path.startswith(f"{prefix}concepts/") and path.endswith(".md")
+    if page_type == "entity":
+        return scope_context.scope == "shared" and path.startswith(f"{prefix}entities/") and path.endswith(".md")
+    if page_type == "faq":
+        return path.startswith(f"{prefix}faq/") and path.endswith(".md")
+    if page_type == "question":
+        return path.startswith(f"{prefix}open_questions/") and path.endswith(".md")
     if page_type == "synthesis":
         return path.startswith(f"{prefix}synthesis/") and path.endswith(".md")
     if page_type in {"index", "changelog"}:

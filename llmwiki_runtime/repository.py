@@ -6,11 +6,21 @@ import hashlib
 from typing import Any
 from uuid import uuid4
 
-from .models import JobRecord, ScopeContext, SourceRecord, WikiPageMetadata
+from .models import (
+    EntityRecord,
+    JobRecord,
+    PolicyRecord,
+    PromotionRecord,
+    QuestionRecord,
+    ScopeContext,
+    SourceRecord,
+    WikiPageMetadata,
+)
 from .notion import (
     NotionClient,
     checkbox_property,
     date_property,
+    multi_select_names,
     number_property,
     plain_text,
     relation_property,
@@ -63,10 +73,37 @@ def _relation_ids(page: dict[str, Any], name: str) -> list[str]:
     return [entry["id"] for entry in (_prop(page, name) or {}).get("relation", [])]
 
 
+def _multi_select(page: dict[str, Any], name: str) -> list[str]:
+    return multi_select_names((_prop(page, name) or {}).get("multi_select"))
+
+
 def _scope_context(page: dict[str, Any]) -> ScopeContext:
     scope = _select(page, "Scope") or "shared"
     owner = _rich_text(page, "Owner") or None
     return ScopeContext(scope, owner)
+
+
+def _policy_score(row: dict[str, Any], scope_context: ScopeContext) -> tuple[int, int, str] | None:
+    row_scope = _select(row, "Policy Target Scope") or "all"
+    row_owner = _rich_text(row, "Policy Owner") or None
+    priority = _number(row, "Policy Priority") or 0
+    if scope_context.scope == "shared":
+        if row_owner is not None:
+            return None
+        if row_scope == "shared":
+            return (0, -priority, row["id"])
+        if row_scope == "all":
+            return (1, -priority, row["id"])
+        return None
+    if row_scope == "private" and row_owner == scope_context.owner:
+        return (0, -priority, row["id"])
+    if row_scope == "private" and row_owner is None:
+        return (1, -priority, row["id"])
+    if row_scope == "all" and row_owner == scope_context.owner:
+        return (2, -priority, row["id"])
+    if row_scope == "all" and row_owner is None:
+        return (3, -priority, row["id"])
+    return None
 
 
 @dataclass
@@ -76,6 +113,9 @@ class NotionRepository:
     wiki_data_source_id: str
     jobs_data_source_id: str
     policies_data_source_id: str
+    entities_data_source_id: str | None = None
+    questions_data_source_id: str | None = None
+    promotions_data_source_id: str | None = None
 
     def _source_from_page(self, page: dict[str, Any]) -> SourceRecord:
         scope_context = _scope_context(page)
@@ -100,10 +140,6 @@ class NotionRepository:
             properties=page["properties"],
         )
 
-    def get_source(self, source_page_id: str) -> SourceRecord:
-        page = self.client.retrieve_page(source_page_id)
-        return self._source_from_page(page)
-
     def _job_from_page(self, page: dict[str, Any]) -> JobRecord:
         scope_context = _scope_context(page)
         return JobRecord(
@@ -116,10 +152,112 @@ class NotionRepository:
             owner=scope_context.owner,
             target_source_page_id=(_relation_ids(page, "Target Source") or [None])[0],
             target_wiki_page_id=(_relation_ids(page, "Target Wiki Page") or [None])[0],
+            target_question_page_id=(_relation_ids(page, "Target Question") or [None])[0],
+            target_promotion_page_id=(_relation_ids(page, "Target Promotion") or [None])[0],
             idempotency_key=_rich_text(page, "Idempotency Key") or None,
             policy_page_id=(_relation_ids(page, "Policy Version Ref") or [None])[0],
             attempt_count=_number(page, "Attempt Count"),
             properties=page["properties"],
+        )
+
+    def _policy_from_page(self, page: dict[str, Any], *, content_markdown: str) -> PolicyRecord:
+        return PolicyRecord(
+            page_id=page["id"],
+            name=_title(page, "Policy Name") or "Unnamed Policy",
+            version=_rich_text(page, "Policy Version") or None,
+            target_scope=_select(page, "Policy Target Scope") or "all",
+            owner=_rich_text(page, "Policy Owner") or None,
+            priority=_number(page, "Policy Priority") or 0,
+            active=_checkbox(page, "Active"),
+            allowed_page_types=_multi_select(page, "Allowed Page Types"),
+            question_mode=_select(page, "Question Mode") or "mixed",
+            entity_extraction=_select(page, "Entity Extraction") or "minimal",
+            promotion_required_for_shared=_checkbox(page, "Promotion Required For Shared"),
+            minimum_review_state_for_shared=_select(page, "Minimum Review State For Shared"),
+            requires_human_review=_checkbox(page, "Requires Human Review"),
+            auto_publish_allowed=_checkbox(page, "Auto Publish Allowed"),
+            max_source_count=_number(page, "Max Source Count"),
+            prompt_bundle_pointer=_url(page, "Prompt Bundle Pointer"),
+            citation_policy_pointer=_url(page, "Citation Policy Pointer"),
+            page_template_pointer=_url(page, "Page Template Pointer"),
+            content_markdown=content_markdown,
+            properties=page["properties"],
+        )
+
+    def _question_from_page(self, page: dict[str, Any]) -> QuestionRecord:
+        scope_context = _scope_context(page)
+        return QuestionRecord(
+            page_id=page["id"],
+            question_id=_rich_text(page, "Question ID") or page["id"],
+            question=_title(page, "Question") or "Untitled Question",
+            status=_select(page, "Question Status") or "queued",
+            scope=scope_context.scope,
+            owner=scope_context.owner,
+            latest_job_page_id=(_relation_ids(page, "Latest Job") or [None])[0],
+            target_wiki_page_id=(_relation_ids(page, "Target Wiki Page") or [None])[0],
+            answer_page_slug=_rich_text(page, "Answer Page Slug") or None,
+            resolution_type=_select(page, "Resolution Type") or None,
+            properties=page["properties"],
+        )
+
+    def _promotion_from_page(self, page: dict[str, Any]) -> PromotionRecord:
+        scope_context = _scope_context(page)
+        return PromotionRecord(
+            page_id=page["id"],
+            promotion_id=_rich_text(page, "Promotion ID") or page["id"],
+            scope=scope_context.scope,
+            owner=scope_context.owner,
+            status=_select(page, "Status") or "pending",
+            decision=_rich_text(page, "Decision") or None,
+            submitted_by=_rich_text(page, "Submitted By") or None,
+            reviewed_by=_rich_text(page, "Reviewed By") or None,
+            source_private_page_id=(_relation_ids(page, "Source Private Page") or [None])[0],
+            target_shared_page_ids=_relation_ids(page, "Target Shared Pages"),
+            latest_job_page_id=(_relation_ids(page, "Latest Job") or [None])[0],
+            properties=page["properties"],
+        )
+
+    def _entity_from_page(self, page: dict[str, Any]) -> EntityRecord:
+        return EntityRecord(
+            page_id=page["id"],
+            canonical_entity_id=_rich_text(page, "Canonical Entity ID") or page["id"],
+            name=_title(page, "Entity Name") or "Unnamed Entity",
+            entity_type=_select(page, "Entity Type") or "concept",
+            properties=page["properties"],
+        )
+
+    def get_source(self, source_page_id: str) -> SourceRecord:
+        return self._source_from_page(self.client.retrieve_page(source_page_id))
+
+    def get_question(self, question_page_id: str) -> QuestionRecord:
+        if not self.questions_data_source_id:
+            raise ValueError("Questions data source is not configured")
+        return self._question_from_page(self.client.retrieve_page(question_page_id))
+
+    def get_promotion(self, promotion_page_id: str) -> PromotionRecord:
+        if not self.promotions_data_source_id:
+            raise ValueError("Promotions data source is not configured")
+        return self._promotion_from_page(self.client.retrieve_page(promotion_page_id))
+
+    def get_wiki_page(self, wiki_page_id: str) -> WikiPageMetadata:
+        page = self.client.retrieve_page(wiki_page_id)
+        scope_context = _scope_context(page)
+        return WikiPageMetadata(
+            path=_rich_text(page, "Canonical Markdown Path"),
+            title=_title(page, "Wiki Title"),
+            slug=_rich_text(page, "Wiki Slug"),
+            page_type=_select(page, "Wiki Type") or "concept",
+            status=_select(page, "Wiki Status") or "draft",
+            confidence=_select(page, "Confidence Level") or "medium",
+            review_required=_checkbox(page, "Needs Human Review"),
+            source_ids=[],
+            source_scope=[],
+            entity_keys=[],
+            scope=scope_context.scope,
+            owner=scope_context.owner,
+            review_state=_select(page, "Review State") or ("unreviewed" if scope_context.scope == "shared" else "n_a"),
+            promotion_origin=_rich_text(page, "Promotion Origin") or None,
+            summary=_rich_text(page, "Summary"),
         )
 
     def query_jobs(self, *, status: str | None = None, page_size: int = 20) -> list[JobRecord]:
@@ -176,11 +314,10 @@ class NotionRepository:
         self.client.update_page(page_id, {"Job Phase": select_property(phase)})
 
     def mark_job_failed(self, page_id: str, error_class: str, message: str, *, output_pointer: str | None = None) -> None:
-        finished_at = now_iso()
         props = {
             "Job Status": select_property("failed"),
             "Job Phase": select_property(None),
-            "Finished At": date_property(finished_at),
+            "Finished At": date_property(now_iso()),
             "Error Class": select_property(error_class),
             "Error Message": rich_text_property(message[:1800]),
             "Locked": checkbox_property(False),
@@ -234,8 +371,7 @@ class NotionRepository:
                 "Attempt Count": number_property(attempt_count + 1),
             },
         )
-        page = self.client.retrieve_page(job_page_id)
-        return self._job_from_page(page)
+        return self._job_from_page(self.client.retrieve_page(job_page_id))
 
     def update_source_for_ingest(
         self,
@@ -271,7 +407,6 @@ class NotionRepository:
         )
 
     def mark_source_failed(self, source: SourceRecord, message: str) -> None:
-        now = now_iso()
         self.client.update_page(
             source.page_id,
             {
@@ -279,28 +414,22 @@ class NotionRepository:
                 "Scope": select_property(source.scope),
                 "Owner": rich_text_property(source.owner or ""),
                 "Parse Error": rich_text_property(message[:1800]),
-                "Last Error At": date_property(now),
+                "Last Error At": date_property(now_iso()),
             },
         )
 
-    def update_source_after_wiki(
-        self,
-        source: SourceRecord,
-        *,
-        source_summary_pointer: str,
-    ) -> None:
-        now = now_iso()
-        self.client.update_page(
-            source.page_id,
-            {
-                "Source Status": select_property("processed"),
-                "Scope": select_property(source.scope),
-                "Owner": rich_text_property(source.owner or ""),
-                "Source Summary Pointer": url_property(source_summary_pointer),
-                "Last Processed At": date_property(now),
-                "Trigger Regeneration": checkbox_property(False),
-            },
-        )
+    def update_source_after_wiki(self, source: SourceRecord, *, source_summary_pointer: str, related_entity_page_ids: list[str] | None = None) -> None:
+        props = {
+            "Source Status": select_property("processed"),
+            "Scope": select_property(source.scope),
+            "Owner": rich_text_property(source.owner or ""),
+            "Source Summary Pointer": url_property(source_summary_pointer),
+            "Last Processed At": date_property(now_iso()),
+            "Trigger Regeneration": checkbox_property(False),
+        }
+        if self.entities_data_source_id and related_entity_page_ids is not None:
+            props["Related Entities"] = relation_property(related_entity_page_ids)
+        self.client.update_page(source.page_id, props)
 
     def find_existing_job_by_idempotency_key(self, key: str) -> JobRecord | None:
         result = self.client.query_data_source(
@@ -315,29 +444,42 @@ class NotionRepository:
         rows = self.client.query_data_source(
             self.policies_data_source_id,
             filter_obj={"property": "Active", "checkbox": {"equals": True}},
-            page_size=20,
+            page_size=50,
         ).get("results", [])
+        if scope_context is None:
+            return rows[0]["id"] if rows else None
+        best_score: tuple[int, int, str] | None = None
+        best_id: str | None = None
         for row in rows:
-            if scope_context is None:
-                return row["id"]
-            row_scope = _select(row, "Policy Target Scope") or "all"
-            row_owner = _rich_text(row, "Policy Owner") or None
-            if row_scope not in {"all", scope_context.scope}:
+            score = _policy_score(row, scope_context)
+            if score is None:
                 continue
-            if scope_context.scope == "private" and row_owner and row_owner != scope_context.owner:
-                continue
-            return row["id"]
-        return rows[0]["id"] if rows else None
+            if best_score is None or score < best_score:
+                best_score = score
+                best_id = row["id"]
+        return best_id
+
+    def load_effective_policy(self, scope_context: ScopeContext) -> PolicyRecord | None:
+        policy_page_id = self.active_policy_page_id(scope_context)
+        if not policy_page_id:
+            return None
+        page = self.client.retrieve_page(policy_page_id)
+        content_markdown = self.client.page_markdown(policy_page_id, title=_title(page, "Policy Name"))
+        return self._policy_from_page(page, content_markdown=content_markdown)
 
     def create_job(
         self,
         *,
         job_type: str,
         title: str,
-        target_source_page_id: str,
         idempotency_key: str,
         scope_context: ScopeContext,
+        target_source_page_id: str | None = None,
+        target_wiki_page_id: str | None = None,
+        target_question_page_id: str | None = None,
+        target_promotion_page_id: str | None = None,
         policy_page_id: str | None = None,
+        trigger_type: str = "manual",
     ) -> JobRecord:
         existing = self.find_existing_job_by_idempotency_key(idempotency_key)
         if existing:
@@ -351,14 +493,21 @@ class NotionRepository:
             "Queue Timestamp": date_property(now_iso()),
             "Scope": select_property(scope_context.scope),
             "Owner": rich_text_property(scope_context.owner or ""),
-            "Trigger Type": select_property("manual"),
+            "Trigger Type": select_property(trigger_type),
             "Priority": select_property("normal"),
             "Attempt Count": number_property(0),
             "Max Attempts": number_property(8),
             "Idempotency Key": rich_text_property(idempotency_key),
             "Locked": checkbox_property(False),
-            "Target Source": relation_property([target_source_page_id]),
         }
+        if target_source_page_id:
+            properties["Target Source"] = relation_property([target_source_page_id])
+        if target_wiki_page_id:
+            properties["Target Wiki Page"] = relation_property([target_wiki_page_id])
+        if target_question_page_id:
+            properties["Target Question"] = relation_property([target_question_page_id])
+        if target_promotion_page_id:
+            properties["Target Promotion"] = relation_property([target_promotion_page_id])
         if policy_page_id:
             properties["Policy Version Ref"] = relation_property([policy_page_id])
         page = self.client.create_page(self.jobs_data_source_id, properties)
@@ -371,6 +520,9 @@ class NotionRepository:
             scope=scope_context.scope,
             owner=scope_context.owner,
             target_source_page_id=target_source_page_id,
+            target_wiki_page_id=target_wiki_page_id,
+            target_question_page_id=target_question_page_id,
+            target_promotion_page_id=target_promotion_page_id,
             idempotency_key=idempotency_key,
             policy_page_id=policy_page_id,
             properties=page["properties"],
@@ -383,11 +535,7 @@ class NotionRepository:
         ]
         if scope_context.scope == "private":
             clauses.append({"property": "Owner", "rich_text": {"equals": scope_context.owner}})
-        result = self.client.query_data_source(
-            self.wiki_data_source_id,
-            filter_obj={"and": clauses},
-            page_size=1,
-        )
+        result = self.client.query_data_source(self.wiki_data_source_id, filter_obj={"and": clauses}, page_size=1)
         rows = result.get("results", [])
         return rows[0] if rows else None
 
@@ -396,9 +544,7 @@ class NotionRepository:
             return []
         result = self.client.query_data_source(
             self.sources_data_source_id,
-            filter_obj={
-                "or": [{"property": "Source ID", "rich_text": {"equals": source_id}} for source_id in source_ids]
-            },
+            filter_obj={"or": [{"property": "Source ID", "rich_text": {"equals": source_id}} for source_id in source_ids]},
             page_size=max(25, len(source_ids) * 4),
         )
         by_source_id: dict[str, list[SourceRecord]] = {}
@@ -428,13 +574,54 @@ class NotionRepository:
             resolved_page_ids.append(allowed[0].page_id)
         return sorted(set(resolved_page_ids))
 
+    def find_entity_by_canonical_id(self, canonical_entity_id: str) -> dict[str, Any] | None:
+        if not self.entities_data_source_id:
+            return None
+        result = self.client.query_data_source(
+            self.entities_data_source_id,
+            filter_obj={"property": "Canonical Entity ID", "rich_text": {"equals": canonical_entity_id}},
+            page_size=1,
+        )
+        rows = result.get("results", [])
+        return rows[0] if rows else None
+
+    def resolve_entity_page_ids(self, entity_keys: list[str]) -> list[str]:
+        if not self.entities_data_source_id or not entity_keys:
+            return []
+        result = self.client.query_data_source(
+            self.entities_data_source_id,
+            filter_obj={"or": [{"property": "Canonical Entity ID", "rich_text": {"equals": key}} for key in entity_keys]},
+            page_size=max(25, len(entity_keys) * 2),
+        )
+        by_key = {
+            self._entity_from_page(page).canonical_entity_id: self._entity_from_page(page).page_id
+            for page in result.get("results", [])
+        }
+        return [by_key[key] for key in entity_keys if key in by_key]
+
+    def upsert_entity(self, *, canonical_entity_id: str, name: str, entity_type: str) -> str:
+        if not self.entities_data_source_id:
+            raise ValueError("Entities data source is not configured")
+        props = {
+            "Entity Name": title_property(name),
+            "Canonical Entity ID": rich_text_property(canonical_entity_id),
+            "Entity Type": select_property(entity_type),
+        }
+        existing = self.find_entity_by_canonical_id(canonical_entity_id)
+        if existing:
+            self.client.update_page(existing["id"], props)
+            return existing["id"]
+        page = self.client.create_page(self.entities_data_source_id, props)
+        return page["id"]
+
     def upsert_wiki_page(
         self,
         metadata: WikiPageMetadata,
         *,
         backing_source_page_ids: list[str],
         latest_job_page_id: str,
-    ) -> None:
+        related_entity_page_ids: list[str] | None = None,
+    ) -> str:
         props = {
             "Wiki Title": title_property(metadata.title),
             "Wiki Slug": rich_text_property(metadata.slug),
@@ -452,8 +639,48 @@ class NotionRepository:
             "Latest Job": relation_property([latest_job_page_id]),
             "Source Count": number_property(len(metadata.source_ids)),
         }
+        if self.entities_data_source_id and related_entity_page_ids is not None:
+            props["Related Entities"] = relation_property(related_entity_page_ids)
         existing = self.find_wiki_page_by_slug(metadata.slug, scope_context=metadata.scope_context)
         if existing:
             self.client.update_page(existing["id"], props)
-        else:
-            self.client.create_page(self.wiki_data_source_id, props)
+            return existing["id"]
+        page = self.client.create_page(self.wiki_data_source_id, props)
+        return page["id"]
+
+    def update_question_after_answer(
+        self,
+        question: QuestionRecord,
+        *,
+        latest_job_page_id: str,
+        target_wiki_page_id: str | None,
+        answer_page_slug: str | None,
+        resolution_type: str,
+    ) -> None:
+        if not self.questions_data_source_id:
+            raise ValueError("Questions data source is not configured")
+        status = "answered" if resolution_type == "faq" else "queued"
+        props = {
+            "Question Status": select_property(status),
+            "Scope": select_property(question.scope),
+            "Owner": rich_text_property(question.owner or ""),
+            "Latest Job": relation_property([latest_job_page_id]),
+            "Answer Page Slug": rich_text_property(answer_page_slug or ""),
+            "Resolution Type": select_property(resolution_type),
+        }
+        if target_wiki_page_id:
+            props["Target Wiki Page"] = relation_property([target_wiki_page_id])
+        self.client.update_page(question.page_id, props)
+
+    def update_promotion_after_apply(self, promotion: PromotionRecord, *, latest_job_page_id: str) -> None:
+        if not self.promotions_data_source_id:
+            raise ValueError("Promotions data source is not configured")
+        self.client.update_page(
+            promotion.page_id,
+            {
+                "Status": select_property("applied"),
+                "Latest Job": relation_property([latest_job_page_id]),
+                "Scope": select_property(promotion.scope),
+                "Owner": rich_text_property(promotion.owner or ""),
+            },
+        )

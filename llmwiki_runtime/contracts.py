@@ -24,13 +24,16 @@ You may never alter or overwrite raw sources.
 - Read source material only from `raw/shared/canonical/<source_id>/`.
 - Write compiled pages only under `wiki/shared/`.
 - Shared pages may cite only shared sources.
+- Shared entity pages live under `wiki/shared/entities/`.
+- Shared answered questions live under `wiki/shared/faq/`.
+- Shared unresolved questions live under `wiki/shared/open_questions/`.
 - Never use private or user-scoped content when updating shared pages.
 
 ## Responsibilities
 
 1. Read the source package in `raw/shared/canonical/<source_id>/`.
 2. Create or update `wiki/shared/sources/<source_id>.md`.
-3. Update only the minimal affected shared concept, synthesis, index, or changelog pages.
+3. Update only the minimal affected shared concept, entity, faq, open-question, synthesis, index, or changelog pages.
 4. Preserve stable slugs and file paths.
 5. Preserve valid frontmatter including `scope`, `owner`, `review_state`, and `promotion_origin`.
 6. Add or update source citations using `[S:<source_id>]`.
@@ -67,12 +70,14 @@ You may never alter or overwrite raw sources.
 - Write compiled pages only under `wiki/users/{owner}/`.
 - Never write to another owner's private scope.
 - Never write to shared scope from a private run.
+- Private answered questions live under `wiki/users/{owner}/faq/`.
+- Private unresolved questions live under `wiki/users/{owner}/open_questions/`.
 
 ## Responsibilities
 
 1. Read the source package in `raw/users/{owner}/canonical/<source_id>/`.
 2. Create or update `wiki/users/{owner}/sources/<source_id>.md`.
-3. Update only the minimal affected private concept, synthesis, index, or changelog pages.
+3. Update only the minimal affected private concept, faq, open-question, synthesis, index, or changelog pages.
 4. Preserve stable slugs and file paths.
 5. Preserve valid frontmatter including `scope`, `owner`, `review_state`, and `promotion_origin`.
 6. Add or update source citations using `[S:<source_id>]`.
@@ -121,6 +126,9 @@ SCHEMA_SHARED = """# Shared schema
 - Shared pages may only cite shared sources.
 - Shared pages live under `wiki/shared/`.
 - Shared raw sources live under `raw/shared/canonical/`.
+- Shared entities live under `wiki/shared/entities/`.
+- Shared answered questions live under `wiki/shared/faq/`.
+- Shared open questions live under `wiki/shared/open_questions/`.
 """
 
 
@@ -129,6 +137,8 @@ SCHEMA_PRIVATE = """# Private schema
 - Private pages live under `wiki/users/<owner>/`.
 - Private raw sources live under `raw/users/<owner>/canonical/`.
 - Private pages may cite shared sources and private sources for the same owner.
+- Private answered questions live under `wiki/users/<owner>/faq/`.
+- Private open questions live under `wiki/users/<owner>/open_questions/`.
 """
 
 
@@ -145,11 +155,16 @@ SCHEMA_TAXONOMY = """# Taxonomy
 - shared wiki roots:
   - `wiki/shared/sources/`
   - `wiki/shared/concepts/`
+  - `wiki/shared/entities/`
+  - `wiki/shared/faq/`
+  - `wiki/shared/open_questions/`
   - `wiki/shared/synthesis/`
   - `wiki/shared/indexes/`
 - private wiki roots:
   - `wiki/users/<owner>/sources/`
   - `wiki/users/<owner>/concepts/`
+  - `wiki/users/<owner>/faq/`
+  - `wiki/users/<owner>/open_questions/`
   - `wiki/users/<owner>/synthesis/`
   - `wiki/users/<owner>/indexes/`
 """

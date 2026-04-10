@@ -39,6 +39,10 @@ class Settings:
     notion_webhook_signing_secret: str | None
     notion_webhook_verification_token: str | None
     log_level: str
+    entities_data_source_id: str | None = None
+    questions_data_source_id: str | None = None
+    promotions_data_source_id: str | None = None
+    public_base_url: str | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -52,6 +56,9 @@ class Settings:
             wiki_data_source_id=_require(data, "WIKI_DS_ID"),
             jobs_data_source_id=_require(data, "JOBS_DS_ID"),
             policies_data_source_id=_require(data, "POLICIES_DS_ID"),
+            entities_data_source_id=data.get("ENTITIES_DS_ID"),
+            questions_data_source_id=data.get("QUESTIONS_DS_ID"),
+            promotions_data_source_id=data.get("PROMOTIONS_DS_ID"),
             wiki_root=Path(data.get("WIKI_ROOT", "./llmwiki")).resolve(),
             worker_name=data.get("WORKER_NAME", "llmwiki-runtime"),
             poll_interval_seconds=_optional_int(data, "POLL_INTERVAL_SECONDS", 5),
@@ -61,5 +68,6 @@ class Settings:
             llm_model=data.get("OPENAI_MODEL", data.get("LLM_MODEL")),
             notion_webhook_signing_secret=data.get("NOTION_WEBHOOK_SIGNING_SECRET"),
             notion_webhook_verification_token=data.get("NOTION_WEBHOOK_VERIFICATION_TOKEN"),
+            public_base_url=data.get("PUBLIC_BASE_URL"),
             log_level=data.get("LOG_LEVEL", "INFO"),
         )

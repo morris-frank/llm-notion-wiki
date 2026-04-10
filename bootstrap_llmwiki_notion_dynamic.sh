@@ -24,6 +24,7 @@ set -euo pipefail
 #   FEATURE_LINK_GRAPH=1
 #   FEATURE_ENTITIES=0
 #   FEATURE_QUESTIONS=0
+#   FEATURE_PROMOTIONS=1
 #   FEATURE_JOB_CONTROL=1
 #   FEATURE_POLICY_ENGINE=1
 #
@@ -42,8 +43,9 @@ FEATURE_EDITORIAL_WORKFLOW="${FEATURE_EDITORIAL_WORKFLOW:-1}"
 FEATURE_FRESHNESS="${FEATURE_FRESHNESS:-1}"
 FEATURE_CONFIDENCE="${FEATURE_CONFIDENCE:-0}"
 FEATURE_LINK_GRAPH="${FEATURE_LINK_GRAPH:-1}"
-FEATURE_ENTITIES="${FEATURE_ENTITIES:-0}"
-FEATURE_QUESTIONS="${FEATURE_QUESTIONS:-0}"
+FEATURE_ENTITIES="${FEATURE_ENTITIES:-1}"
+FEATURE_QUESTIONS="${FEATURE_QUESTIONS:-1}"
+FEATURE_PROMOTIONS="${FEATURE_PROMOTIONS:-1}"
 FEATURE_JOB_CONTROL="${FEATURE_JOB_CONTROL:-1}"
 FEATURE_POLICY_ENGINE="${FEATURE_POLICY_ENGINE:-1}"
 
@@ -163,11 +165,13 @@ SOURCES_PROPS="$TMP_DIR/sources_props.json"
 WIKI_PROPS="$TMP_DIR/wiki_props.json"
 JOBS_PROPS="$TMP_DIR/jobs_props.json"
 POLICIES_PROPS="$TMP_DIR/policies_props.json"
+PROMOTIONS_PROPS="$TMP_DIR/promotions_props.json"
 
 json_init_object "$SOURCES_PROPS"
 json_init_object "$WIKI_PROPS"
 json_init_object "$JOBS_PROPS"
 json_init_object "$POLICIES_PROPS"
+json_init_object "$PROMOTIONS_PROPS"
 
 # Sources: always-on
 add_prop "$SOURCES_PROPS" "Source Title" '{ "title": {} }'
@@ -257,6 +261,9 @@ add_prop "$WIKI_PROPS" "Wiki Type" '{
   "select": { "options": [
     { "name": "source", "color": "green" },
     { "name": "concept", "color": "purple" },
+    { "name": "entity", "color": "blue" },
+    { "name": "faq", "color": "orange" },
+    { "name": "question", "color": "yellow" },
     { "name": "synthesis", "color": "pink" },
     { "name": "index", "color": "blue" },
     { "name": "changelog", "color": "brown" }
@@ -363,6 +370,10 @@ if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
   append_select_option "$JOBS_PROPS" "Job Type" '{ "name": "answer_question", "color": "brown" }'
 fi
 
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  append_select_option "$JOBS_PROPS" "Job Type" '{ "name": "promote_private", "color": "red" }'
+fi
+
 if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then
   add_prop "$JOBS_PROPS" "Trigger Type" '{
     "select": { "options": [
@@ -435,6 +446,41 @@ add_prop "$POLICIES_PROPS" "Policy Target Scope" '{
   ] }
 }'
 add_prop "$POLICIES_PROPS" "Policy Owner" '{ "rich_text": {} }'
+add_prop "$POLICIES_PROPS" "Allowed Page Types" '{
+  "multi_select": { "options": [
+    { "name": "source", "color": "green" },
+    { "name": "concept", "color": "purple" },
+    { "name": "entity", "color": "blue" },
+    { "name": "faq", "color": "orange" },
+    { "name": "question", "color": "yellow" },
+    { "name": "synthesis", "color": "pink" },
+    { "name": "index", "color": "gray" },
+    { "name": "changelog", "color": "brown" }
+  ] }
+}'
+add_prop "$POLICIES_PROPS" "Question Mode" '{
+  "select": { "options": [
+    { "name": "open_question", "color": "yellow" },
+    { "name": "faq", "color": "green" },
+    { "name": "mixed", "color": "blue" }
+  ] }
+}'
+add_prop "$POLICIES_PROPS" "Entity Extraction" '{
+  "select": { "options": [
+    { "name": "off", "color": "gray" },
+    { "name": "minimal", "color": "blue" },
+    { "name": "full", "color": "green" }
+  ] }
+}'
+add_prop "$POLICIES_PROPS" "Promotion Required For Shared" '{ "checkbox": {} }'
+add_prop "$POLICIES_PROPS" "Minimum Review State For Shared" '{
+  "select": { "options": [
+    { "name": "unreviewed", "color": "gray" },
+    { "name": "in_review", "color": "yellow" },
+    { "name": "approved", "color": "green" }
+  ] }
+}'
+add_prop "$POLICIES_PROPS" "Policy Priority" '{ "number": { "format": "number" } }'
 
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
   add_prop "$POLICIES_PROPS" "Prompt Bundle Pointer" '{ "url": {} }'
@@ -513,6 +559,7 @@ POLICIES_DS_ID="$(jq -r '.id' <<<"$POLICIES_RESP")"
 
 ENTITIES_DS_ID=""
 QUESTIONS_DS_ID=""
+PROMOTIONS_DS_ID=""
 
 if [[ "$FEATURE_ENTITIES" == "1" ]]; then
   ENTITIES_PROPS="$TMP_DIR/entities_props.json"
@@ -539,6 +586,13 @@ if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
   json_init_object "$QUESTIONS_PROPS"
   add_prop "$QUESTIONS_PROPS" "Question" '{ "title": {} }'
   add_prop "$QUESTIONS_PROPS" "Question ID" '{ "rich_text": {} }'
+  add_prop "$QUESTIONS_PROPS" "Scope" '{
+    "select": { "options": [
+      { "name": "shared", "color": "blue" },
+      { "name": "private", "color": "orange" }
+    ] }
+  }'
+  add_prop "$QUESTIONS_PROPS" "Owner" '{ "rich_text": {} }'
   add_prop "$QUESTIONS_PROPS" "Question Status" '{
     "select": { "options": [
       { "name": "queued", "color": "gray" },
@@ -546,8 +600,39 @@ if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
       { "name": "archived", "color": "brown" }
     ] }
   }'
+  add_prop "$QUESTIONS_PROPS" "Answer Page Slug" '{ "rich_text": {} }'
+  add_prop "$QUESTIONS_PROPS" "Resolution Type" '{
+    "select": { "options": [
+      { "name": "open_question", "color": "yellow" },
+      { "name": "faq", "color": "green" }
+    ] }
+  }'
   QUESTIONS_RESP="$(create_ds "Questions" "$QUESTIONS_PROPS")"
   QUESTIONS_DS_ID="$(jq -r '.id' <<<"$QUESTIONS_RESP")"
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" ]]; then
+  add_prop "$PROMOTIONS_PROPS" "Promotion ID" '{ "title": {} }'
+  add_prop "$PROMOTIONS_PROPS" "Scope" '{
+    "select": { "options": [
+      { "name": "shared", "color": "blue" },
+      { "name": "private", "color": "orange" }
+    ] }
+  }'
+  add_prop "$PROMOTIONS_PROPS" "Owner" '{ "rich_text": {} }'
+  add_prop "$PROMOTIONS_PROPS" "Status" '{
+    "select": { "options": [
+      { "name": "pending", "color": "gray" },
+      { "name": "approved", "color": "green" },
+      { "name": "rejected", "color": "red" },
+      { "name": "applied", "color": "blue" }
+    ] }
+  }'
+  add_prop "$PROMOTIONS_PROPS" "Decision" '{ "rich_text": {} }'
+  add_prop "$PROMOTIONS_PROPS" "Submitted By" '{ "rich_text": {} }'
+  add_prop "$PROMOTIONS_PROPS" "Reviewed By" '{ "rich_text": {} }'
+  PROMOTIONS_RESP="$(create_ds "Promotions" "$PROMOTIONS_PROPS")"
+  PROMOTIONS_DS_ID="$(jq -r '.id' <<<"$PROMOTIONS_RESP")"
 fi
 
 # ---------------------------
@@ -592,6 +677,19 @@ if [[ "$FEATURE_ENTITIES" == "1" && -n "$ENTITIES_DS_ID" ]]; then
   patch_relation_prop "$WIKI_DS_ID" "Related Entities" "$ENTITIES_DS_ID" "single"
 fi
 
+if [[ "$FEATURE_QUESTIONS" == "1" && -n "$QUESTIONS_DS_ID" ]]; then
+  patch_relation_prop "$QUESTIONS_DS_ID" "Latest Job" "$JOBS_DS_ID" "single"
+  patch_relation_prop "$QUESTIONS_DS_ID" "Target Wiki Page" "$WIKI_DS_ID" "single"
+  patch_relation_prop "$JOBS_DS_ID" "Target Question" "$QUESTIONS_DS_ID" "single"
+fi
+
+if [[ "$FEATURE_PROMOTIONS" == "1" && -n "$PROMOTIONS_DS_ID" ]]; then
+  patch_relation_prop "$PROMOTIONS_DS_ID" "Source Private Page" "$WIKI_DS_ID" "single"
+  patch_relation_prop "$PROMOTIONS_DS_ID" "Target Shared Pages" "$WIKI_DS_ID" "single"
+  patch_relation_prop "$PROMOTIONS_DS_ID" "Latest Job" "$JOBS_DS_ID" "single"
+  patch_relation_prop "$JOBS_DS_ID" "Target Promotion" "$PROMOTIONS_DS_ID" "single"
+fi
+
 # ---------------------------
 # Seed rows dynamically
 # ---------------------------
@@ -605,6 +703,21 @@ add_prop "$POLICY_SEED" "Policy Scope" '{ "select": { "name": "global" } }'
 add_prop "$POLICY_SEED" "Active" '{ "checkbox": true }'
 add_prop "$POLICY_SEED" "Policy Target Scope" '{ "select": { "name": "all" } }'
 add_prop "$POLICY_SEED" "Policy Owner" '{ "rich_text": [] }'
+add_prop "$POLICY_SEED" "Allowed Page Types" '{ "multi_select": [
+  { "name": "source" },
+  { "name": "concept" },
+  { "name": "entity" },
+  { "name": "faq" },
+  { "name": "question" },
+  { "name": "synthesis" },
+  { "name": "index" },
+  { "name": "changelog" }
+] }'
+add_prop "$POLICY_SEED" "Question Mode" '{ "select": { "name": "mixed" } }'
+add_prop "$POLICY_SEED" "Entity Extraction" '{ "select": { "name": "minimal" } }'
+add_prop "$POLICY_SEED" "Promotion Required For Shared" '{ "checkbox": true }'
+add_prop "$POLICY_SEED" "Minimum Review State For Shared" '{ "select": { "name": "in_review" } }'
+add_prop "$POLICY_SEED" "Policy Priority" '{ "number": 100 }'
 
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
   add_prop "$POLICY_SEED" "Prompt Bundle Pointer" "$(jq -cn --arg v "$POLICY_PROMPT_BUNDLE_URL" '{url:$v}')"
@@ -717,6 +830,7 @@ echo "  FEATURE_CONFIDENCE=$FEATURE_CONFIDENCE"
 echo "  FEATURE_LINK_GRAPH=$FEATURE_LINK_GRAPH"
 echo "  FEATURE_ENTITIES=$FEATURE_ENTITIES"
 echo "  FEATURE_QUESTIONS=$FEATURE_QUESTIONS"
+echo "  FEATURE_PROMOTIONS=$FEATURE_PROMOTIONS"
 echo "  FEATURE_JOB_CONTROL=$FEATURE_JOB_CONTROL"
 echo "  FEATURE_POLICY_ENGINE=$FEATURE_POLICY_ENGINE"
 echo
@@ -728,6 +842,7 @@ echo "export JOBS_DS_ID=$JOBS_DS_ID"
 echo "export POLICIES_DS_ID=$POLICIES_DS_ID"
 [[ -n "$ENTITIES_DS_ID" ]] && echo "export ENTITIES_DS_ID=$ENTITIES_DS_ID"
 [[ -n "$QUESTIONS_DS_ID" ]] && echo "export QUESTIONS_DS_ID=$QUESTIONS_DS_ID"
+[[ -n "$PROMOTIONS_DS_ID" ]] && echo "export PROMOTIONS_DS_ID=$PROMOTIONS_DS_ID"
 echo "export POLICY_PAGE_ID=$POLICY_PAGE_ID"
 echo "export SOURCE_PAGE_ID=$SOURCE_PAGE_ID"
 echo "export JOB_PAGE_ID=$JOB_PAGE_ID"

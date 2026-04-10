@@ -9,7 +9,7 @@ from typing import Any
 from urllib import request
 
 from .models import SourceArtifacts, SourceRecord
-from .notion import NotionClient, notion_page_id_from_reference, plain_text
+from .notion import NotionClient, notion_page_id_from_reference
 from .paths import ScopedPaths
 from .wiki_ops import sha256_text
 
@@ -65,53 +65,6 @@ def _write_artifacts(base_dir: Path, metadata: dict[str, Any], raw_text: str, ma
     )
 
 
-def _notion_rich_text_to_markdown(rich_text: list[dict[str, Any]] | None) -> str:
-    return plain_text(rich_text)
-
-
-def _block_to_markdown(block: dict[str, Any], indent: int = 0) -> str:
-    block_type = block["type"]
-    data = block.get(block_type, {})
-    text = _notion_rich_text_to_markdown(data.get("rich_text"))
-    prefix = "  " * indent
-    if block_type == "paragraph":
-        return f"{prefix}{text}\n\n" if text else "\n"
-    if block_type == "heading_1":
-        return f"# {text}\n\n"
-    if block_type == "heading_2":
-        return f"## {text}\n\n"
-    if block_type == "heading_3":
-        return f"### {text}\n\n"
-    if block_type == "bulleted_list_item":
-        return f"{prefix}- {text}\n"
-    if block_type == "numbered_list_item":
-        return f"{prefix}1. {text}\n"
-    if block_type == "quote":
-        return f"{prefix}> {text}\n\n"
-    if block_type == "code":
-        language = data.get("language", "text")
-        return f"```{language}\n{text}\n```\n\n"
-    if block_type == "to_do":
-        checked = "x" if data.get("checked") else " "
-        return f"{prefix}- [{checked}] {text}\n"
-    return f"{prefix}{text}\n\n" if text else ""
-
-
-def _collect_notion_blocks(client: NotionClient, block_id: str, indent: int = 0) -> str:
-    markdown_chunks: list[str] = []
-    cursor = None
-    while True:
-        response = client.retrieve_block_children(block_id, start_cursor=cursor)
-        for result in response.get("results", []):
-            markdown_chunks.append(_block_to_markdown(result, indent=indent))
-            if result.get("has_children"):
-                markdown_chunks.append(_collect_notion_blocks(client, result["id"], indent=indent + 1))
-        cursor = response.get("next_cursor")
-        if not response.get("has_more"):
-            break
-    return "".join(markdown_chunks)
-
-
 @dataclass
 class SourceFetcher:
     notion_client: NotionClient
@@ -159,10 +112,18 @@ class SourceFetcher:
                 f"notion_page source is missing a target page reference: {source.source_id}. "
                 "Set Target Notion Page ID or Canonical URL to the target page."
             )
-        page = self.notion_client.retrieve_page(target_page_id)
-        title = source.title or plain_text(page.get("properties", {}).get("title", {}).get("title"))
-        markdown = _collect_notion_blocks(self.notion_client, target_page_id)
-        markdown = f"# {title}\n\n{markdown.strip()}\n"
+        title = source.title
+        if hasattr(self.notion_client, "page_markdown"):
+            markdown = self.notion_client.page_markdown(target_page_id, title=title)
+        else:  # pragma: no cover - compatibility for older test doubles
+            page = self.notion_client.retrieve_page(target_page_id)
+            body = ""
+            if hasattr(self.notion_client, "retrieve_block_children"):
+                from .notion import _collect_notion_blocks
+
+                body = _collect_notion_blocks(self.notion_client, target_page_id).strip()
+            fallback_title = title or page.get("id", "Untitled")
+            markdown = f"# {fallback_title}\n\n{body}\n"
         raw_text = re.sub(r"(?m)^#+\s*", "", markdown)
         metadata = {
             "source_id": source.source_id,

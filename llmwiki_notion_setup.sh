@@ -137,10 +137,13 @@ echo "  FEATURE_LINK_GRAPH         - relations between sources, wiki pages, and 
 FEATURE_LINK_GRAPH="$(prompt_yes_no "Enable link graph relations?" 1)"
 echo
 echo "  FEATURE_ENTITIES           - Entities data source and entity relations"
-FEATURE_ENTITIES="$(prompt_yes_no "Enable entities data source?" 0)"
+FEATURE_ENTITIES="$(prompt_yes_no "Enable entities data source?" 1)"
 echo
 echo "  FEATURE_QUESTIONS          - Questions data source and question-driven jobs"
-FEATURE_QUESTIONS="$(prompt_yes_no "Enable questions data source?" 0)"
+FEATURE_QUESTIONS="$(prompt_yes_no "Enable questions data source?" 1)"
+echo
+echo "  FEATURE_PROMOTIONS         - promotion review queue and promote_private jobs"
+FEATURE_PROMOTIONS="$(prompt_yes_no "Enable promotions data source?" 1)"
 echo
 echo "  FEATURE_JOB_CONTROL        - retries, locking, worker metadata, and error/audit fields"
 FEATURE_JOB_CONTROL="$(prompt_yes_no "Enable advanced job control?" 1)"
@@ -196,6 +199,7 @@ env \
   FEATURE_LINK_GRAPH="$FEATURE_LINK_GRAPH" \
   FEATURE_ENTITIES="$FEATURE_ENTITIES" \
   FEATURE_QUESTIONS="$FEATURE_QUESTIONS" \
+  FEATURE_PROMOTIONS="$FEATURE_PROMOTIONS" \
   FEATURE_JOB_CONTROL="$FEATURE_JOB_CONTROL" \
   FEATURE_POLICY_ENGINE="$FEATURE_POLICY_ENGINE" \
   POLICY_PROMPT_BUNDLE_URL="$POLICY_PROMPT_BUNDLE_URL" \
@@ -225,6 +229,7 @@ SOURCE_PAGE_ID="$(extract_export SOURCE_PAGE_ID "$BOOTSTRAP_OUT" || true)"
 JOB_PAGE_ID="$(extract_export JOB_PAGE_ID "$BOOTSTRAP_OUT" || true)"
 ENTITIES_DS_ID="$(extract_export ENTITIES_DS_ID "$BOOTSTRAP_OUT" || true)"
 QUESTIONS_DS_ID="$(extract_export QUESTIONS_DS_ID "$BOOTSTRAP_OUT" || true)"
+PROMOTIONS_DS_ID="$(extract_export PROMOTIONS_DS_ID "$BOOTSTRAP_OUT" || true)"
 
 for required in CONTROL_DB_ID SOURCES_DS_ID WIKI_DS_ID JOBS_DS_ID POLICIES_DS_ID; do
   if [[ -z "${!required:-}" ]]; then
@@ -249,6 +254,7 @@ env \
   JOB_PAGE_ID="$JOB_PAGE_ID" \
   ENTITIES_DS_ID="$ENTITIES_DS_ID" \
   QUESTIONS_DS_ID="$QUESTIONS_DS_ID" \
+  PROMOTIONS_DS_ID="$PROMOTIONS_DS_ID" \
   FEATURE_SOURCE_ENRICHMENT="$FEATURE_SOURCE_ENRICHMENT" \
   FEATURE_SOURCE_DIAGNOSTICS="$FEATURE_SOURCE_DIAGNOSTICS" \
   FEATURE_EDITORIAL_WORKFLOW="$FEATURE_EDITORIAL_WORKFLOW" \
@@ -257,6 +263,7 @@ env \
   FEATURE_LINK_GRAPH="$FEATURE_LINK_GRAPH" \
   FEATURE_ENTITIES="$FEATURE_ENTITIES" \
   FEATURE_QUESTIONS="$FEATURE_QUESTIONS" \
+  FEATURE_PROMOTIONS="$FEATURE_PROMOTIONS" \
   FEATURE_JOB_CONTROL="$FEATURE_JOB_CONTROL" \
   FEATURE_POLICY_ENGINE="$FEATURE_POLICY_ENGINE" \
   bash "$VERIFY_SCRIPT"
@@ -272,6 +279,7 @@ echo "export JOBS_DS_ID=$JOBS_DS_ID"
 echo "export POLICIES_DS_ID=$POLICIES_DS_ID"
 [[ -n "$ENTITIES_DS_ID" ]] && echo "export ENTITIES_DS_ID=$ENTITIES_DS_ID"
 [[ -n "$QUESTIONS_DS_ID" ]] && echo "export QUESTIONS_DS_ID=$QUESTIONS_DS_ID"
+[[ -n "$PROMOTIONS_DS_ID" ]] && echo "export PROMOTIONS_DS_ID=$PROMOTIONS_DS_ID"
 [[ -n "$POLICY_PAGE_ID" ]] && echo "export POLICY_PAGE_ID=$POLICY_PAGE_ID"
 [[ -n "$SOURCE_PAGE_ID" ]] && echo "export SOURCE_PAGE_ID=$SOURCE_PAGE_ID"
 [[ -n "$JOB_PAGE_ID" ]] && echo "export JOB_PAGE_ID=$JOB_PAGE_ID"

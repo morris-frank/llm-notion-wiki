@@ -12,8 +12,11 @@ from llmwiki_runtime.wiki_ops import (
     ensure_wiki_root,
     load_candidate_pages,
     load_manifest,
+    load_shared_overlay_pages,
     parse_run_plan,
+    update_manifest,
     validate_run_plan,
+    write_run_record,
 )
 
 
@@ -223,6 +226,142 @@ class WikiOpsTests(unittest.TestCase):
             scoped_paths = ScopedPaths(root, ScopeContext("shared"))
             with self.assertRaises(ValueError):
                 load_manifest(scoped_paths, "src_1")
+
+    def test_validate_run_plan_rejects_non_list_affected_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            plan = parse_run_plan(
+                """
+                {
+                  "schema_version": "v1",
+                  "job_id": "job_1",
+                  "source_id": "src_1",
+                  "run_mode": "apply",
+                  "summary": {"decision": "no_op", "reason": "noop", "review_required": false, "confidence": "medium"},
+                  "touched_paths": [],
+                  "operations": [{"op": "no_op", "path": "wiki/shared/sources/src_1.md", "page_type": "source", "reason": "noop"}],
+                  "manifest_update": {"source_page": "wiki/shared/sources/src_1.md", "affected_pages": "bad"},
+                  "warnings": []
+                }
+                """
+            )
+            with self.assertRaises(ValueError):
+                validate_run_plan(plan, root=root, scope_context=ScopeContext("shared"))
+
+    def test_validate_run_plan_rejects_bad_source_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            plan = parse_run_plan(
+                """
+                {
+                  "schema_version": "v1",
+                  "job_id": "job_1",
+                  "source_id": "src_1",
+                  "run_mode": "apply",
+                  "summary": {"decision": "no_op", "reason": "noop", "review_required": false, "confidence": "medium"},
+                  "touched_paths": [],
+                  "operations": [{"op": "no_op", "path": "wiki/shared/sources/src_1.md", "page_type": "source", "reason": "noop"}],
+                  "manifest_update": {"source_page": "wiki/shared/concepts/not-a-source.md", "affected_pages": []},
+                  "warnings": []
+                }
+                """
+            )
+            with self.assertRaises(ValueError):
+                validate_run_plan(plan, root=root, scope_context=ScopeContext("shared"))
+
+    def test_update_manifest_normalizes_and_deduplicates_affected_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            scoped_paths = ScopedPaths(root, ScopeContext("shared"))
+            manifest_path = update_manifest(
+                scoped_paths=scoped_paths,
+                source_id="src_1",
+                checksum="sha256:test",
+                source_page="wiki/shared/sources/src_1.md",
+                affected_pages=[
+                    "wiki/shared/indexes/index.md",
+                    "wiki/shared/indexes/index.md",
+                    "wiki/shared/sources/src_1.md",
+                ],
+                job_id="job_1",
+            )
+            payload = load_manifest(scoped_paths, "src_1")
+            self.assertEqual(
+                payload["affected_pages"],
+                ["wiki/shared/indexes/index.md", "wiki/shared/sources/src_1.md"],
+            )
+            self.assertTrue(manifest_path.exists())
+
+    def test_load_shared_overlay_pages_loads_valid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            shared_source = root / "wiki" / "shared" / "sources" / "src_1.md"
+            shared_source.write_text("source", encoding="utf-8")
+            manifest_root = root / "state" / "manifests" / "shared"
+            manifest_root.mkdir(parents=True, exist_ok=True)
+            (manifest_root / "src_1.json").write_text(
+                """
+                {
+                  "source_id": "src_1",
+                  "scope": "shared",
+                  "owner": null,
+                  "checksum": "sha256:test",
+                  "source_page": "wiki/shared/sources/src_1.md",
+                  "affected_pages": ["wiki/shared/indexes/index.md", "wiki/shared/sources/src_1.md"],
+                  "last_job_id": "job_1",
+                  "last_updated_at": "2026-04-10T00:00:00Z"
+                }
+                """,
+                encoding="utf-8",
+            )
+            pages = load_shared_overlay_pages(root)
+            self.assertIn("wiki/shared/sources/src_1.md", pages)
+
+    def test_load_shared_overlay_pages_rejects_invalid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            manifest_root = root / "state" / "manifests" / "shared"
+            manifest_root.mkdir(parents=True, exist_ok=True)
+            (manifest_root / "src_1.json").write_text(
+                """
+                {
+                  "source_id": "src_1",
+                  "scope": "shared",
+                  "owner": null,
+                  "checksum": "sha256:test",
+                  "source_page": "wiki/shared/sources/src_1.md",
+                  "affected_pages": ["wiki/users/alice/concepts/oops.md"],
+                  "last_job_id": "job_1",
+                  "last_updated_at": "2026-04-10T00:00:00Z"
+                }
+                """,
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                load_shared_overlay_pages(root)
+
+    def test_write_run_record_supports_failure_without_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_wiki_root(root)
+            scoped_paths = ScopedPaths(root, ScopeContext("shared"))
+            path = write_run_record(
+                scoped_paths=scoped_paths,
+                job_id="job_1",
+                raw_model_output="bad output",
+                plan=None,
+                changed=None,
+                manifest_path=None,
+                failure={"stage": "validating_plan", "error_class": "validation", "message": "bad"},
+            )
+            payload = path.read_text(encoding="utf-8")
+            self.assertIn('"plan": null', payload)
+            self.assertIn('"failure"', payload)
 
 
 if __name__ == "__main__":
