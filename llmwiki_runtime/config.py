@@ -38,6 +38,7 @@ class Settings:
     llm_model: str | None
     notion_webhook_signing_secret: str | None
     notion_webhook_verification_token: str | None
+    log_level: str
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -60,4 +61,5 @@ class Settings:
             llm_model=data.get("OPENAI_MODEL", data.get("LLM_MODEL")),
             notion_webhook_signing_secret=data.get("NOTION_WEBHOOK_SIGNING_SECRET"),
             notion_webhook_verification_token=data.get("NOTION_WEBHOOK_VERIFICATION_TOKEN"),
+            log_level=data.get("LOG_LEVEL", "INFO"),
         )

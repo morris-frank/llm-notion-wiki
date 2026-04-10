@@ -6,15 +6,16 @@ import tempfile
 import unittest
 
 from llmwiki_runtime.llm import StaticPlanner
-from llmwiki_runtime.models import JobRecord, SourceArtifacts, SourceRecord, WikiPageMetadata
+from llmwiki_runtime.models import JobRecord, ScopeContext, SourceArtifacts, SourceRecord, WikiPageMetadata
+from llmwiki_runtime.paths import ScopedPaths
 from llmwiki_runtime.worker import Worker
-from llmwiki_runtime.wiki_ops import ensure_wiki_root
+from llmwiki_runtime.wiki_ops import ensure_owner_scope, ensure_wiki_root
 
 
 class FakeRepository:
     def __init__(self, source: SourceRecord) -> None:
         self.source = source
-        self.created_jobs: list[tuple[str, str]] = []
+        self.created_jobs: list[tuple[str, str, str, str | None]] = []
         self.updated_source_ingest: dict[str, str] | None = None
         self.updated_source_summary: str | None = None
         self.succeeded_jobs: list[str] = []
@@ -25,17 +26,28 @@ class FakeRepository:
     def get_source(self, source_page_id: str) -> SourceRecord:
         return self.source
 
-    def active_policy_page_id(self) -> str:
+    def active_policy_page_id(self, scope_context: ScopeContext | None = None) -> str:
         return "policy-page-id"
 
-    def create_job(self, *, job_type: str, title: str, target_source_page_id: str, idempotency_key: str, policy_page_id: str | None = None) -> JobRecord:
-        self.created_jobs.append((job_type, idempotency_key))
+    def create_job(
+        self,
+        *,
+        job_type: str,
+        title: str,
+        target_source_page_id: str,
+        idempotency_key: str,
+        scope_context: ScopeContext,
+        policy_page_id: str | None = None,
+    ) -> JobRecord:
+        self.created_jobs.append((job_type, idempotency_key, scope_context.scope, scope_context.owner))
         return JobRecord(
             page_id=f"page-{job_type}",
             job_id=f"job-{job_type}",
             job_type=job_type,
             status="queued",
             queue_timestamp=None,
+            scope=scope_context.scope,
+            owner=scope_context.owner,
             target_source_page_id=target_source_page_id,
             idempotency_key=idempotency_key,
             policy_page_id=policy_page_id,
@@ -82,11 +94,14 @@ class FakeFetcher:
         self.root = root
 
     def fetch(self, source: SourceRecord) -> SourceArtifacts:
-        directory = self.root / "raw" / "sources" / source.source_id
+        scoped_paths = ScopedPaths(self.root, source.scope_context)
+        directory = scoped_paths.source_artifact_dir(source.source_id)
         directory.mkdir(parents=True, exist_ok=True)
         metadata = {
             "source_id": source.source_id,
             "title": source.title,
+            "scope": source.scope,
+            "owner": source.owner,
             "checksum": "sha256:test",
         }
         (directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
@@ -102,10 +117,11 @@ class FakeFetcher:
 
 
 class WorkerFlowTests(unittest.TestCase):
-    def test_ingest_then_update_wiki(self) -> None:
+    def test_private_ingest_then_update_wiki(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             ensure_wiki_root(root)
+            ensure_owner_scope(root, "alice")
             source = SourceRecord(
                 page_id="source-page-id",
                 source_id="src_1",
@@ -114,6 +130,8 @@ class WorkerFlowTests(unittest.TestCase):
                 canonical_url="https://example.com/source",
                 trust_level="primary",
                 status="queued",
+                scope="private",
+                owner="alice",
                 content_version=1,
             )
             repository = FakeRepository(source)
@@ -125,11 +143,13 @@ class WorkerFlowTests(unittest.TestCase):
                 job_type="ingest_source",
                 status="queued",
                 queue_timestamp=None,
+                scope="private",
+                owner="alice",
                 target_source_page_id=source.page_id,
             )
             ingest_worker.run_job(ingest_job)
             self.assertTrue(repository.updated_source_ingest)
-            self.assertTrue(any(job_type == "update_wiki" for job_type, _ in repository.created_jobs))
+            self.assertTrue(any(job_type == "update_wiki" for job_type, _, _, _ in repository.created_jobs))
 
             planner = StaticPlanner(
                 response="""
@@ -145,21 +165,21 @@ class WorkerFlowTests(unittest.TestCase):
                     "confidence": "medium"
                   },
                   "touched_paths": [
-                    "wiki/sources/src_1.md",
-                    "wiki/index.md",
-                    "wiki/changelog/ingest-log.md"
+                    "wiki/users/alice/sources/src_1.md",
+                    "wiki/users/alice/indexes/index.md",
+                    "wiki/users/alice/indexes/ingest-log.md"
                   ],
                   "operations": [
                     {
                       "op": "create_file",
-                      "path": "wiki/sources/src_1.md",
+                      "path": "wiki/users/alice/sources/src_1.md",
                       "page_type": "source",
                       "reason": "Create the source summary page.",
-                      "content": "---\\ntitle: \\"Example Source\\"\\npage_type: \\"source\\"\\nslug: \\"src-1\\"\\nstatus: \\"draft\\"\\nupdated_at: \\"2026-04-10T00:00:00Z\\"\\nsource_ids:\\n  - \\"src_1\\"\\nentity_keys: []\\nconcept_keys:\\n  - \\"example-source\\"\\nconfidence: \\"medium\\"\\nreview_required: false\\nsource_type: \\"web_page\\"\\ncanonical_url: \\"https://example.com/source\\"\\nchecksum: \\"sha256:test\\"\\n---\\n# Example Source\\n\\n## One-line summary\\nA concise summary of the source.\\n\\n## Source summary\\nThis source introduces the example runtime. [S:src_1]\\n\\n## Main claims\\n- The worker can produce deterministic wiki updates. [S:src_1]\\n\\n## Important entities\\n- None.\\n\\n## Important concepts\\n- Example runtime [S:src_1]\\n\\n## Reliability notes\\n- This is a synthetic test source. [S:src_1]\\n\\n## Related pages\\n- [[index]]\\n\\n## Change log\\n- 2026-04-10: created from source src_1\\n\\n## Sources\\n- [S:src_1] Example Source. https://example.com/source\\n"
+                      "content": "---\\ntitle: \\"Example Source\\"\\npage_type: \\"source\\"\\nslug: \\"src-1\\"\\nstatus: \\"draft\\"\\nupdated_at: \\"2026-04-10T00:00:00Z\\"\\nsource_ids:\\n  - \\"src_1\\"\\nsource_scope:\\n  - \\"private\\"\\nentity_keys: []\\nconcept_keys:\\n  - \\"example-source\\"\\nconfidence: \\"medium\\"\\nreview_required: false\\nscope: \\"private\\"\\nowner: \\"alice\\"\\nreview_state: \\"n_a\\"\\npromotion_origin: null\\nsource_type: \\"web_page\\"\\ncanonical_url: \\"https://example.com/source\\"\\nchecksum: \\"sha256:test\\"\\n---\\n# Example Source\\n\\n## One-line summary\\nA concise summary of the source.\\n\\n## Source summary\\nThis source introduces the example runtime. [S:src_1]\\n\\n## Main claims\\n- The worker can produce deterministic wiki updates. [S:src_1]\\n\\n## Important entities\\n- None.\\n\\n## Important concepts\\n- Example runtime [S:src_1]\\n\\n## Reliability notes\\n- This is a synthetic test source. [S:src_1]\\n\\n## Related pages\\n- [[index]]\\n\\n## Change log\\n- 2026-04-10: created from source src_1\\n\\n## Sources\\n- [S:src_1] Example Source. https://example.com/source\\n"
                     },
                     {
                       "op": "patch_sections",
-                      "path": "wiki/index.md",
+                      "path": "wiki/users/alice/indexes/index.md",
                       "page_type": "index",
                       "reason": "Add the new source to the index.",
                       "section_patches": [
@@ -182,18 +202,18 @@ class WorkerFlowTests(unittest.TestCase):
                     },
                     {
                       "op": "append_block",
-                      "path": "wiki/changelog/ingest-log.md",
+                      "path": "wiki/users/alice/indexes/ingest-log.md",
                       "page_type": "changelog",
                       "reason": "Record the run.",
-                      "content": "- 2026-04-10T00:00:00Z | job_update | src_1 | created wiki/sources/src_1.md; updated wiki/index.md"
+                      "content": "- 2026-04-10T00:00:00Z | job_update | src_1 | created wiki/users/alice/sources/src_1.md; updated wiki/users/alice/indexes/index.md"
                     }
                   ],
                   "manifest_update": {
-                    "source_page": "wiki/sources/src_1.md",
+                    "source_page": "wiki/users/alice/sources/src_1.md",
                     "affected_pages": [
-                      "wiki/sources/src_1.md",
-                      "wiki/index.md",
-                      "wiki/changelog/ingest-log.md"
+                      "wiki/users/alice/sources/src_1.md",
+                      "wiki/users/alice/indexes/index.md",
+                      "wiki/users/alice/indexes/ingest-log.md"
                     ]
                   },
                   "warnings": []
@@ -207,16 +227,19 @@ class WorkerFlowTests(unittest.TestCase):
                 job_type="update_wiki",
                 status="queued",
                 queue_timestamp=None,
+                scope="private",
+                owner="alice",
                 target_source_page_id=source.page_id,
             )
             update_worker.run_job(update_job)
-            self.assertTrue((root / "wiki" / "sources" / "src_1.md").exists())
-            self.assertTrue((root / "state" / "manifests" / "src_1.json").exists())
-            self.assertTrue((root / "state" / "runs" / "job_update.json").exists())
-            self.assertTrue((root / "exports" / "diffs" / "job_update.patch").exists())
+            self.assertTrue((root / "wiki" / "users" / "alice" / "sources" / "src_1.md").exists())
+            self.assertTrue((root / "state" / "manifests" / "users" / "alice" / "src_1.json").exists())
+            self.assertTrue((root / "state" / "runs" / "users" / "alice" / "job_update.json").exists())
+            self.assertTrue((root / "exports" / "diffs" / "users" / "alice" / "job_update.patch").exists())
             self.assertTrue(repository.upserted_pages)
             self.assertIsNotNone(repository.updated_source_summary)
             self.assertIn("update-page-id", repository.succeeded_jobs)
+            self.assertTrue(all(page.scope == "private" and page.owner == "alice" for page in repository.upserted_pages))
 
 
 if __name__ == "__main__":

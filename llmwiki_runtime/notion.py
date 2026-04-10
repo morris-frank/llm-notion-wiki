@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 from urllib import error, parse, request
 
@@ -126,3 +127,37 @@ def plain_text(rich_nodes: list[dict[str, Any]] | None) -> str:
         return ""
     return "".join(node.get("plain_text", "") for node in rich_nodes)
 
+
+_NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
+
+
+def normalize_notion_id(value: str) -> str | None:
+    cleaned = value.strip()
+    match = _NOTION_ID_RE.fullmatch(cleaned)
+    if not match:
+        return None
+    hex_value = cleaned.replace("-", "").lower()
+    return (
+        f"{hex_value[:8]}-{hex_value[8:12]}-{hex_value[12:16]}-"
+        f"{hex_value[16:20]}-{hex_value[20:32]}"
+    )
+
+
+def notion_page_id_from_reference(value: str | None) -> str | None:
+    if not value:
+        return None
+    direct = normalize_notion_id(value)
+    if direct:
+        return direct
+    parsed = parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    match = None
+    for candidate in reversed(parsed.path.split("/")):
+        found = _NOTION_ID_RE.search(candidate)
+        if found:
+            match = found.group(1)
+            break
+    if not match:
+        return None
+    return normalize_notion_id(match)

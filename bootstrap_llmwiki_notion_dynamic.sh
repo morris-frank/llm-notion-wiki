@@ -172,6 +172,13 @@ json_init_object "$POLICIES_PROPS"
 # Sources: always-on
 add_prop "$SOURCES_PROPS" "Source Title" '{ "title": {} }'
 add_prop "$SOURCES_PROPS" "Source ID" '{ "rich_text": {} }'
+add_prop "$SOURCES_PROPS" "Scope" '{
+  "select": { "options": [
+    { "name": "shared", "color": "blue" },
+    { "name": "private", "color": "orange" }
+  ] }
+}'
+add_prop "$SOURCES_PROPS" "Owner" '{ "rich_text": {} }'
 add_prop "$SOURCES_PROPS" "Source Type" '{
   "select": { "options": [
     { "name": "notion_page", "color": "blue" },
@@ -238,6 +245,13 @@ fi
 # Wiki Pages: always-on
 add_prop "$WIKI_PROPS" "Wiki Title" '{ "title": {} }'
 add_prop "$WIKI_PROPS" "Wiki Slug" '{ "rich_text": {} }'
+add_prop "$WIKI_PROPS" "Scope" '{
+  "select": { "options": [
+    { "name": "shared", "color": "blue" },
+    { "name": "private", "color": "orange" }
+  ] }
+}'
+add_prop "$WIKI_PROPS" "Owner" '{ "rich_text": {} }'
 add_prop "$WIKI_PROPS" "Wiki Type" '{
   "select": { "options": [
     { "name": "source", "color": "green" },
@@ -270,6 +284,15 @@ fi
 
 if [[ "$FEATURE_EDITORIAL_WORKFLOW" == "1" ]]; then
   add_prop "$WIKI_PROPS" "Needs Human Review" '{ "checkbox": {} }'
+  add_prop "$WIKI_PROPS" "Review State" '{
+    "select": { "options": [
+      { "name": "unreviewed", "color": "gray" },
+      { "name": "in_review", "color": "yellow" },
+      { "name": "approved", "color": "green" },
+      { "name": "rejected", "color": "red" },
+      { "name": "n_a", "color": "blue" }
+    ] }
+  }'
   add_prop "$WIKI_PROPS" "Last Reviewed At" '{ "date": {} }'
   add_prop "$WIKI_PROPS" "Last Published At" '{ "date": {} }'
   add_prop "$WIKI_PROPS" "Editorial State" '{
@@ -310,6 +333,13 @@ fi
 # Jobs: always-on
 add_prop "$JOBS_PROPS" "Job Title" '{ "title": {} }'
 add_prop "$JOBS_PROPS" "Job ID" '{ "rich_text": {} }'
+add_prop "$JOBS_PROPS" "Scope" '{
+  "select": { "options": [
+    { "name": "shared", "color": "blue" },
+    { "name": "private", "color": "orange" }
+  ] }
+}'
+add_prop "$JOBS_PROPS" "Owner" '{ "rich_text": {} }'
 add_prop "$JOBS_PROPS" "Job Type" '{
   "select": { "options": [
     { "name": "ingest_source", "color": "blue" },
@@ -396,6 +426,14 @@ add_prop "$POLICIES_PROPS" "Policy Scope" '{
   ] }
 }'
 add_prop "$POLICIES_PROPS" "Active" '{ "checkbox": {} }'
+add_prop "$POLICIES_PROPS" "Policy Target Scope" '{
+  "select": { "options": [
+    { "name": "all", "color": "gray" },
+    { "name": "shared", "color": "blue" },
+    { "name": "private", "color": "orange" }
+  ] }
+}'
+add_prop "$POLICIES_PROPS" "Policy Owner" '{ "rich_text": {} }'
 
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
   add_prop "$POLICIES_PROPS" "Prompt Bundle Pointer" '{ "url": {} }'
@@ -564,6 +602,8 @@ add_prop "$POLICY_SEED" "Policy Name" '{ "title": [{ "text": { "content": "Defau
 add_prop "$POLICY_SEED" "Policy Version" '{ "rich_text": [{ "text": { "content": "v1" } }] }'
 add_prop "$POLICY_SEED" "Policy Scope" '{ "select": { "name": "global" } }'
 add_prop "$POLICY_SEED" "Active" '{ "checkbox": true }'
+add_prop "$POLICY_SEED" "Policy Target Scope" '{ "select": { "name": "all" } }'
+add_prop "$POLICY_SEED" "Policy Owner" '{ "rich_text": [] }'
 
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
   add_prop "$POLICY_SEED" "Prompt Bundle Pointer" "$(jq -cn --arg v "$POLICY_PROMPT_BUNDLE_URL" '{url:$v}')"
@@ -600,6 +640,8 @@ SOURCE_SEED="$TMP_DIR/source_seed_props.json"
 json_init_object "$SOURCE_SEED"
 add_prop "$SOURCE_SEED" "Source Title" '{ "title": [{ "text": { "content": "Karpathy llm-wiki gist" } }] }'
 add_prop "$SOURCE_SEED" "Source ID" '{ "rich_text": [{ "text": { "content": "src_karpathy_llmwiki_001" } }] }'
+add_prop "$SOURCE_SEED" "Scope" '{ "select": { "name": "shared" } }'
+add_prop "$SOURCE_SEED" "Owner" '{ "rich_text": [] }'
 add_prop "$SOURCE_SEED" "Source Type" '{ "select": { "name": "web_page" } }'
 add_prop "$SOURCE_SEED" "Canonical URL" '{ "url": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f" }'
 add_prop "$SOURCE_SEED" "Trust Level" '{ "select": { "name": "primary" } }'
@@ -630,6 +672,8 @@ JOB_SEED="$TMP_DIR/job_seed_props.json"
 json_init_object "$JOB_SEED"
 add_prop "$JOB_SEED" "Job Title" '{ "title": [{ "text": { "content": "Ingest Karpathy llm-wiki gist" } }] }'
 add_prop "$JOB_SEED" "Job ID" '{ "rich_text": [{ "text": { "content": "job_000001" } }] }'
+add_prop "$JOB_SEED" "Scope" '{ "select": { "name": "shared" } }'
+add_prop "$JOB_SEED" "Owner" '{ "rich_text": [] }'
 add_prop "$JOB_SEED" "Job Type" '{ "select": { "name": "ingest_source" } }'
 add_prop "$JOB_SEED" "Job Status" '{ "select": { "name": "queued" } }'
 add_prop "$JOB_SEED" "Queue Timestamp" '{ "date": { "start": "2026-04-09T14:05:00Z" } }'

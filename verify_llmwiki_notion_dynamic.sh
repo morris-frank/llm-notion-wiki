@@ -244,11 +244,14 @@ echo "# Verifying Sources schema"
 
 # always-on
 for p in \
-  "Source Title" "Source ID" "Source Type" "Canonical URL" \
+  "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" \
   "Trust Level" "Source Status" "Imported At"
 do
   assert_prop_present "$SOURCES_JSON" "$p"
 done
+
+check_select_option_present "$SOURCES_JSON" "Scope" "shared"
+check_select_option_present "$SOURCES_JSON" "Scope" "private"
 
 # optional present
 if [[ "$FEATURE_SOURCE_ENRICHMENT" == "1" ]]; then
@@ -317,11 +320,14 @@ echo
 echo "# Verifying Wiki Pages schema"
 
 for p in \
-  "Wiki Title" "Wiki Slug" "Wiki Type" "Wiki Status" \
+  "Wiki Title" "Wiki Slug" "Scope" "Owner" "Wiki Type" "Wiki Status" \
   "Canonical Markdown Path" "Summary" "Confidence Level"
 do
   assert_prop_present "$WIKI_JSON" "$p"
 done
+
+check_select_option_present "$WIKI_JSON" "Scope" "shared"
+check_select_option_present "$WIKI_JSON" "Scope" "private"
 
 for option in "source" "concept" "synthesis" "index" "changelog"; do
   check_select_option_present "$WIKI_JSON" "Wiki Type" "$option"
@@ -335,17 +341,23 @@ fi
 
 if [[ "$FEATURE_EDITORIAL_WORKFLOW" == "1" ]]; then
   for p in \
-    "Needs Human Review" "Last Reviewed At" \
+    "Needs Human Review" "Review State" "Last Reviewed At" \
     "Last Published At" "Editorial State"
   do
     assert_prop_present "$WIKI_JSON" "$p"
   done
 else
   for p in \
-    "Needs Human Review" "Last Reviewed At" \
+    "Needs Human Review" "Review State" "Last Reviewed At" \
     "Last Published At" "Editorial State"
   do
     assert_prop_absent "$WIKI_JSON" "$p"
+  done
+fi
+
+if [[ "$FEATURE_EDITORIAL_WORKFLOW" == "1" ]]; then
+  for option in "unreviewed" "in_review" "approved" "rejected" "n_a"; do
+    check_select_option_present "$WIKI_JSON" "Review State" "$option"
   done
 fi
 
@@ -390,9 +402,12 @@ fi
 echo
 echo "# Verifying Jobs schema"
 
-for p in "Job Title" "Job ID" "Job Type" "Job Status" "Queue Timestamp"; do
+for p in "Job Title" "Job ID" "Scope" "Owner" "Job Type" "Job Status" "Queue Timestamp"; do
   assert_prop_present "$JOBS_JSON" "$p"
 done
+
+check_select_option_present "$JOBS_JSON" "Scope" "shared"
+check_select_option_present "$JOBS_JSON" "Scope" "private"
 
 if [[ "$FEATURE_QUESTIONS" == "1" ]]; then
   check_select_option_present "$JOBS_JSON" "Job Type" "answer_question"
@@ -437,8 +452,12 @@ fi
 echo
 echo "# Verifying Policies schema"
 
-for p in "Policy Name" "Policy Version" "Policy Scope" "Active"; do
+for p in "Policy Name" "Policy Version" "Policy Scope" "Active" "Policy Target Scope" "Policy Owner"; do
   assert_prop_present "$POLICIES_JSON" "$p"
+done
+
+for option in "all" "shared" "private"; do
+  check_select_option_present "$POLICIES_JSON" "Policy Target Scope" "$option"
 done
 
 if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
@@ -507,6 +526,8 @@ echo "# Verifying key property types"
 
 assert_prop_type "$SOURCES_JSON" "Source Title" "title"
 assert_prop_type "$SOURCES_JSON" "Source ID" "rich_text"
+assert_prop_type "$SOURCES_JSON" "Scope" "select"
+assert_prop_type "$SOURCES_JSON" "Owner" "rich_text"
 assert_prop_type "$SOURCES_JSON" "Source Type" "select"
 assert_prop_type "$SOURCES_JSON" "Canonical URL" "url"
 assert_prop_type "$SOURCES_JSON" "Trust Level" "select"
@@ -515,6 +536,8 @@ assert_prop_type "$SOURCES_JSON" "Imported At" "date"
 
 assert_prop_type "$WIKI_JSON" "Wiki Title" "title"
 assert_prop_type "$WIKI_JSON" "Wiki Slug" "rich_text"
+assert_prop_type "$WIKI_JSON" "Scope" "select"
+assert_prop_type "$WIKI_JSON" "Owner" "rich_text"
 assert_prop_type "$WIKI_JSON" "Wiki Type" "select"
 assert_prop_type "$WIKI_JSON" "Wiki Status" "select"
 assert_prop_type "$WIKI_JSON" "Canonical Markdown Path" "rich_text"
@@ -523,6 +546,8 @@ assert_prop_type "$WIKI_JSON" "Confidence Level" "select"
 
 assert_prop_type "$JOBS_JSON" "Job Title" "title"
 assert_prop_type "$JOBS_JSON" "Job ID" "rich_text"
+assert_prop_type "$JOBS_JSON" "Scope" "select"
+assert_prop_type "$JOBS_JSON" "Owner" "rich_text"
 assert_prop_type "$JOBS_JSON" "Job Type" "select"
 assert_prop_type "$JOBS_JSON" "Job Status" "select"
 assert_prop_type "$JOBS_JSON" "Queue Timestamp" "date"
@@ -534,6 +559,8 @@ assert_prop_type "$POLICIES_JSON" "Policy Name" "title"
 assert_prop_type "$POLICIES_JSON" "Policy Version" "rich_text"
 assert_prop_type "$POLICIES_JSON" "Policy Scope" "select"
 assert_prop_type "$POLICIES_JSON" "Active" "checkbox"
+assert_prop_type "$POLICIES_JSON" "Policy Target Scope" "select"
+assert_prop_type "$POLICIES_JSON" "Policy Owner" "rich_text"
 
 echo
 echo "# Verifying relation targets when enabled"
@@ -592,7 +619,7 @@ echo "# Optional seed page property checks"
 
 if [[ -n "${POLICY_PAGE_ID:-}" ]]; then
   POLICY_PAGE_JSON="$(api GET "/pages/${POLICY_PAGE_ID}")"
-  for p in "Policy Name" "Policy Version" "Policy Scope" "Active"; do
+  for p in "Policy Name" "Policy Version" "Policy Scope" "Active" "Policy Target Scope" "Policy Owner"; do
     assert_page_has_prop "$POLICY_PAGE_JSON" "$p"
   done
   if [[ "$FEATURE_POLICY_ENGINE" == "1" ]]; then
@@ -604,7 +631,7 @@ fi
 
 if [[ -n "${SOURCE_PAGE_ID:-}" ]]; then
   SOURCE_PAGE_JSON="$(api GET "/pages/${SOURCE_PAGE_ID}")"
-  for p in "Source Title" "Source ID" "Source Type" "Canonical URL" "Trust Level" "Source Status" "Imported At"; do
+  for p in "Source Title" "Source ID" "Scope" "Owner" "Source Type" "Canonical URL" "Trust Level" "Source Status" "Imported At"; do
     assert_page_has_prop "$SOURCE_PAGE_JSON" "$p"
   done
   if [[ "$FEATURE_SOURCE_ENRICHMENT" == "1" ]]; then
@@ -622,7 +649,7 @@ fi
 
 if [[ -n "${JOB_PAGE_ID:-}" ]]; then
   JOB_PAGE_JSON="$(api GET "/pages/${JOB_PAGE_ID}")"
-  for p in "Job Title" "Job ID" "Job Type" "Job Status" "Queue Timestamp"; do
+  for p in "Job Title" "Job ID" "Scope" "Owner" "Job Type" "Job Status" "Queue Timestamp"; do
     assert_page_has_prop "$JOB_PAGE_JSON" "$p"
   done
   if [[ "$FEATURE_JOB_CONTROL" == "1" ]]; then

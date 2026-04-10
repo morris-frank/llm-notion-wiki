@@ -9,7 +9,8 @@ from typing import Any
 from urllib import request
 
 from .models import SourceArtifacts, SourceRecord
-from .notion import NotionClient, plain_text
+from .notion import NotionClient, notion_page_id_from_reference, plain_text
+from .paths import ScopedPaths
 from .wiki_ops import sha256_text
 
 
@@ -117,7 +118,7 @@ class SourceFetcher:
     wiki_root: Path
 
     def fetch(self, source: SourceRecord) -> SourceArtifacts:
-        output_dir = self.wiki_root / "raw" / "sources" / source.source_id
+        output_dir = ScopedPaths(self.wiki_root, source.scope_context).source_artifact_dir(source.source_id)
         if source.source_type == "web_page":
             return self._fetch_web_page(source, output_dir)
         if source.source_type == "notion_page":
@@ -127,7 +128,14 @@ class SourceFetcher:
     def _fetch_web_page(self, source: SourceRecord, output_dir: Path) -> SourceArtifacts:
         if not source.canonical_url:
             raise ValueError(f"web_page source is missing Canonical URL: {source.source_id}")
-        with request.urlopen(source.canonical_url) as response:
+        req = request.Request(
+            source.canonical_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; llmwiki-runtime/0.1; +https://example.invalid)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        with request.urlopen(req) as response:
             html = response.read().decode("utf-8", errors="replace")
         parser = _HTMLTextExtractor()
         parser.feed(html)
@@ -137,22 +145,32 @@ class SourceFetcher:
         metadata = {
             "source_id": source.source_id,
             "source_type": source.source_type,
+            "scope": source.scope,
+            "owner": source.owner,
             "canonical_url": source.canonical_url,
             "title": title,
         }
         return _write_artifacts(output_dir, metadata, raw_text, markdown)
 
     def _fetch_notion_page(self, source: SourceRecord, output_dir: Path) -> SourceArtifacts:
-        page = self.notion_client.retrieve_page(source.page_id)
+        target_page_id = source.target_page_id or notion_page_id_from_reference(source.canonical_url)
+        if not target_page_id:
+            raise ValueError(
+                f"notion_page source is missing a target page reference: {source.source_id}. "
+                "Set Target Notion Page ID or Canonical URL to the target page."
+            )
+        page = self.notion_client.retrieve_page(target_page_id)
         title = source.title or plain_text(page.get("properties", {}).get("title", {}).get("title"))
-        markdown = _collect_notion_blocks(self.notion_client, source.page_id)
+        markdown = _collect_notion_blocks(self.notion_client, target_page_id)
         markdown = f"# {title}\n\n{markdown.strip()}\n"
         raw_text = re.sub(r"(?m)^#+\s*", "", markdown)
         metadata = {
             "source_id": source.source_id,
             "source_type": source.source_type,
+            "scope": source.scope,
+            "owner": source.owner,
             "canonical_url": source.canonical_url,
             "title": title,
-            "notion_page_id": source.page_id,
+            "notion_page_id": target_page_id,
         }
         return _write_artifacts(output_dir, metadata, raw_text, markdown)

@@ -1,41 +1,43 @@
 from __future__ import annotations
 
-from pathlib import Path
+from .models import ScopeContext
 
 
 OPERATION_SCHEMA_VERSION = "v1"
 
-MAINTAINER_CONTRACT = """# LLMWiki Maintainer Contract
 
-You are the maintainer of this wiki.
+def maintainer_contract(scope_context: ScopeContext) -> str:
+    if scope_context.scope == "shared":
+        return f"""# Shared LLMWiki Maintainer Contract
 
-Your job is not to chat. Your job is to maintain a persistent markdown wiki from source material.
+You maintain the shared team wiki.
 
 ## System purpose
 
-The wiki is the durable knowledge layer.
-The raw source directory is immutable.
-You may create and update wiki pages.
+The wiki is the durable shared knowledge layer.
+Raw source directories are immutable.
+You may create and update wiki pages in `wiki/shared/`.
 You may never alter or overwrite raw sources.
 
-## Canonical layers
+## Scope rules
 
-1. `raw/` contains immutable source material and source metadata.
-2. `wiki/` contains the maintained markdown wiki.
-3. `state/` contains operational manifests and run records.
+- Read source material only from `raw/shared/canonical/<source_id>/`.
+- Write compiled pages only under `wiki/shared/`.
+- Shared pages may cite only shared sources.
+- Never use private or user-scoped content when updating shared pages.
 
 ## Responsibilities
 
-1. Read the source package in `raw/sources/<source_id>/`.
-2. Create or update `wiki/sources/<source_id>.md`.
-3. Update only the minimal set of affected concept, synthesis, index, or changelog pages.
+1. Read the source package in `raw/shared/canonical/<source_id>/`.
+2. Create or update `wiki/shared/sources/<source_id>.md`.
+3. Update only the minimal affected shared concept, synthesis, index, or changelog pages.
 4. Preserve stable slugs and file paths.
-5. Preserve valid frontmatter.
+5. Preserve valid frontmatter including `scope`, `owner`, `review_state`, and `promotion_origin`.
 6. Add or update source citations using `[S:<source_id>]`.
-7. Avoid duplicating pages where an existing page already covers the same concept.
+7. Avoid duplicate overlapping pages.
 8. Mark uncertainty explicitly.
 9. Record substantive changes in the page change log.
-10. Keep the wiki internally consistent.
+10. Keep the shared wiki internally consistent.
 
 ## Non-negotiable rules
 
@@ -44,9 +46,51 @@ You may never alter or overwrite raw sources.
 - If sources conflict, preserve the conflict and mark the page status as `conflicted`.
 - If evidence is weak or incomplete, set `confidence` to `low` and `review_required` to `true`.
 - Do not write conversational filler.
-- Do not write outside `wiki/`.
+- Do not write outside `wiki/shared/`.
 - Return exactly one JSON object matching the file-operation contract.
 """
+    owner = scope_context.owner
+    return f"""# Private LLMWiki Maintainer Contract
+
+You maintain the private wiki for owner `{owner}`.
+
+## System purpose
+
+The private wiki is durable user-scoped knowledge.
+Raw source directories are immutable.
+You may create and update wiki pages in `wiki/users/{owner}/`.
+You may never alter or overwrite raw sources.
+
+## Scope rules
+
+- Read source material only from `raw/users/{owner}/canonical/<source_id>/` and shared references already present in the private wiki.
+- Write compiled pages only under `wiki/users/{owner}/`.
+- Never write to another owner's private scope.
+- Never write to shared scope from a private run.
+
+## Responsibilities
+
+1. Read the source package in `raw/users/{owner}/canonical/<source_id>/`.
+2. Create or update `wiki/users/{owner}/sources/<source_id>.md`.
+3. Update only the minimal affected private concept, synthesis, index, or changelog pages.
+4. Preserve stable slugs and file paths.
+5. Preserve valid frontmatter including `scope`, `owner`, `review_state`, and `promotion_origin`.
+6. Add or update source citations using `[S:<source_id>]`.
+7. Avoid duplicate overlapping pages.
+8. Mark uncertainty explicitly.
+9. Record substantive changes in the page change log.
+10. Keep the private wiki internally consistent.
+
+## Non-negotiable rules
+
+- Never fabricate a source, claim, citation, concept, URL, or fact.
+- Never write to `wiki/shared/`.
+- Never write to `wiki/users/<other-owner>/`.
+- If evidence is weak or incomplete, set `confidence` to `low` and `review_required` to `true`.
+- Do not write conversational filler.
+- Return exactly one JSON object matching the file-operation contract.
+"""
+
 
 FILE_OPERATION_CONTRACT = """## File operation output contract
 
@@ -65,106 +109,47 @@ Prefer `patch_sections` over `replace_file`.
 Use `append_block` only for append-only changelog updates.
 Use `create_file` only for genuinely new pages.
 Use `no_op` when no change is required.
-Do not emit operations for files outside `wiki/`.
+Do not emit operations for files outside `wiki/shared/` or `wiki/users/<owner>/`.
 Do not emit duplicate operations for the same path unless they are merged into one operation.
 Every touched page must remain valid markdown with valid frontmatter.
+Every created or updated page must preserve `scope`, `owner`, `review_state`, and `promotion_origin`.
 """
 
-SEED_PAGES = {
-    "wiki/index.md": {
-        "title": "Wiki Index",
-        "page_type": "index",
-        "slug": "index",
-        "body": """# Wiki Index
 
-## One-line summary
-Top-level navigation for the wiki.
+SCHEMA_SHARED = """# Shared schema
 
-## Key points
-- This page links to current synthesis and source summaries.
-
-## Details
-- Update when navigation changes materially.
-
-## Evidence
-
-## Open questions
-
-## Related pages
-- [[current-state]]
-
-## Change log
-- Bootstrapped by runtime.
-
-## Sources
-""",
-    },
-    "wiki/synthesis/current-state.md": {
-        "title": "Current State",
-        "page_type": "synthesis",
-        "slug": "current-state",
-        "body": """# Current State
-
-## One-line summary
-Rolling synthesis of the current source set.
-
-## Key points
-
-## Details
-
-## Evidence
-
-## Open questions
-
-## Related pages
-- [[index]]
-
-## Change log
-- Bootstrapped by runtime.
-
-## Sources
-""",
-    },
-    "wiki/changelog/ingest-log.md": {
-        "title": "Ingest Log",
-        "page_type": "changelog",
-        "slug": "ingest-log",
-        "body": """# Ingest Log
-
-## One-line summary
-Append-only record of source ingestion and wiki updates.
-
-## Key points
-- One line per successful wiki-maintainer run.
-
-## Details
-- This page is append-only outside deliberate migrations.
-
-## Evidence
-
-## Open questions
-
-## Related pages
-- [[index]]
-
-## Change log
-- Bootstrapped by runtime.
-
-## Sources
-""",
-    },
-}
+- Shared pages may only cite shared sources.
+- Shared pages live under `wiki/shared/`.
+- Shared raw sources live under `raw/shared/canonical/`.
+"""
 
 
-def wiki_root_paths(root: Path) -> list[Path]:
-    return [
-        root / "raw" / "sources",
-        root / "wiki" / "sources",
-        root / "wiki" / "concepts",
-        root / "wiki" / "synthesis",
-        root / "wiki" / "changelog",
-        root / "state" / "manifests",
-        root / "state" / "runs",
-        root / "exports" / "diffs",
-        root / "config",
-    ]
+SCHEMA_PRIVATE = """# Private schema
+
+- Private pages live under `wiki/users/<owner>/`.
+- Private raw sources live under `raw/users/<owner>/canonical/`.
+- Private pages may cite shared sources and private sources for the same owner.
+"""
+
+
+SCHEMA_PROMOTION = """# Promotion schema placeholder
+
+Promotion is deferred.
+Reserved fields: `review_state`, `promotion_origin`.
+Shared pages must not depend on private content until promotion exists.
+"""
+
+
+SCHEMA_TAXONOMY = """# Taxonomy
+
+- shared wiki roots:
+  - `wiki/shared/sources/`
+  - `wiki/shared/concepts/`
+  - `wiki/shared/synthesis/`
+  - `wiki/shared/indexes/`
+- private wiki roots:
+  - `wiki/users/<owner>/sources/`
+  - `wiki/users/<owner>/concepts/`
+  - `wiki/users/<owner>/synthesis/`
+  - `wiki/users/<owner>/indexes/`
+"""

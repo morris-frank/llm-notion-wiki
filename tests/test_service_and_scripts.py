@@ -7,12 +7,13 @@ import tempfile
 import unittest
 
 from llmwiki_runtime.config import Settings
+from llmwiki_runtime.models import ScopeContext
 from llmwiki_runtime.service import ServiceApp
 
 
 class StubRepository:
     def __init__(self) -> None:
-        self.created_jobs: list[tuple[str, str]] = []
+        self.created_jobs: list[tuple[str, str, ScopeContext]] = []
         self.source = type(
             "Source",
             (),
@@ -20,6 +21,9 @@ class StubRepository:
                 "page_id": "source-page-id",
                 "source_id": "src_1",
                 "title": "Source",
+                "scope": "private",
+                "owner": "alice",
+                "scope_context": ScopeContext("private", "alice"),
                 "trigger_regeneration": False,
                 "content_version": 3,
                 "checksum": "sha256:test",
@@ -31,12 +35,27 @@ class StubRepository:
     def get_source(self, source_page_id: str):
         return self.source
 
-    def active_policy_page_id(self) -> str:
+    def active_policy_page_id(self, scope_context: ScopeContext | None = None) -> str:
         return "policy-page-id"
 
-    def create_job(self, *, job_type: str, title: str, target_source_page_id: str, idempotency_key: str, policy_page_id: str | None = None):
-        self.created_jobs.append((job_type, idempotency_key))
-        return type("Job", (), {"job_id": "job-1"})()
+    def create_job(
+        self,
+        *,
+        job_type: str,
+        title: str,
+        target_source_page_id: str,
+        idempotency_key: str,
+        scope_context: ScopeContext,
+        policy_page_id: str | None = None,
+    ):
+        self.created_jobs.append((job_type, idempotency_key, scope_context))
+        return type("Job", (), {"job_id": "job-1", "scope": scope_context.scope, "owner": scope_context.owner})()
+
+    def query_jobs(self, *, status: str | None = None, page_size: int = 20):
+        return []
+
+    def requeue_job(self, job_page_id: str):
+        return type("Job", (), {"job_id": "job-2", "page_id": job_page_id, "status": "queued", "scope": "private", "owner": "alice"})()
 
 
 class StubWorker:
@@ -44,7 +63,18 @@ class StubWorker:
         self.repository = StubRepository()
 
     def enqueue_ingest_job(self, source_page_id: str):
-        return type("Job", (), {"job_id": "job-1", "page_id": "page-1", "status": "queued", "target_source_page_id": source_page_id})()
+        return type(
+            "Job",
+            (),
+            {
+                "job_id": "job-1",
+                "page_id": "page-1",
+                "status": "queued",
+                "target_source_page_id": source_page_id,
+                "scope": "private",
+                "owner": "alice",
+            },
+        )()
 
 
 class ServiceAndScriptTests(unittest.TestCase):
@@ -68,6 +98,7 @@ class ServiceAndScriptTests(unittest.TestCase):
                 llm_model=None,
                 notion_webhook_signing_secret=None,
                 notion_webhook_verification_token="verify-token",
+                log_level="INFO",
             )
             app = ServiceApp(settings=settings, worker=StubWorker())
             body = b'{"type":"page.properties_updated","entity":{"id":"source-page-id","type":"page"}}'
@@ -76,18 +107,26 @@ class ServiceAndScriptTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(payload["accepted"])
             self.assertTrue(app.worker.repository.created_jobs)
+            _, key, scope_context = app.worker.repository.created_jobs[0]
+            self.assertEqual(scope_context.scope, "private")
+            self.assertEqual(scope_context.owner, "alice")
+            self.assertIn(":private:alice:", key)
 
-    def test_scripts_include_v1_contract(self) -> None:
+    def test_scripts_include_scope_contract(self) -> None:
         repo_root = Path(__file__).resolve().parent.parent
         bootstrap = (repo_root / "bootstrap_llmwiki_notion_dynamic.sh").read_text(encoding="utf-8")
         verify = (repo_root / "verify_llmwiki_notion_dynamic.sh").read_text(encoding="utf-8")
         setup = (repo_root / "llmwiki_notion_setup.sh").read_text(encoding="utf-8")
         self.assertIn("Confidence Level", bootstrap)
         self.assertIn("Job Phase", bootstrap)
-        self.assertIn("Confidence Level", verify)
-        self.assertIn("Job Phase", verify)
-        self.assertIn('Enable entities data source?" 0', setup)
-        self.assertIn('Enable source enrichment?" 1', setup)
+        self.assertIn("Scope", bootstrap)
+        self.assertIn("Owner", bootstrap)
+        self.assertIn("Review State", bootstrap)
+        self.assertIn("Policy Target Scope", bootstrap)
+        self.assertIn("Scope", verify)
+        self.assertIn("Owner", verify)
+        self.assertIn("Enable entities data source?\" 0", setup)
+        self.assertIn("Enable source enrichment?\" 1", setup)
 
 
 if __name__ == "__main__":
