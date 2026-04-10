@@ -241,17 +241,20 @@ class NotionRepository:
             page = self.client.retrieve_page(page_id)
         except (NotionAPIError, error.HTTPError):
             return None
-        properties = page.get("properties", {})
-        if "Source Title" in properties:
-            return WebhookResolveSource(source=self._source_from_page(page))
-        if "Question" in properties and self.questions_data_source_id:
-            return WebhookResolveQuestion(question=self._question_from_page(page))
-        if "Promotion ID" in properties and self.promotions_data_source_id:
-            return WebhookResolvePromotion(promotion=self._promotion_from_page(page))
-        source = self._source_from_page(page)
-        if source.properties.get("Source Title") is None:
+        try:
+            properties = page.get("properties", {})
+            if "Source Title" in properties:
+                return WebhookResolveSource(source=self._source_from_page(page))
+            if "Question" in properties and self.questions_data_source_id:
+                return WebhookResolveQuestion(question=self._question_from_page(page))
+            if "Promotion ID" in properties and self.promotions_data_source_id:
+                return WebhookResolvePromotion(promotion=self._promotion_from_page(page))
+            source = self._source_from_page(page)
+            if source.properties.get("Source Title") is None:
+                return None
+            return WebhookResolveSource(source=source)
+        except (AttributeError, KeyError, TypeError, ValueError):
             return None
-        return WebhookResolveSource(source=source)
 
     def get_question(self, question_page_id: str) -> QuestionRecord:
         if not self.questions_data_source_id:

@@ -134,6 +134,12 @@ class SourceFetcherTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             assert_public_http_url("http://192.168.0.1/path")
 
+    @mock.patch("llmwiki_runtime.sources.socket.getaddrinfo", return_value=[])
+    def test_assert_public_http_url_rejects_empty_dns_resolution(self, _mock_gai) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            assert_public_http_url("https://example.invalid/")
+        self.assertIn("public address", str(ctx.exception).lower())
+
     def test_web_page_missing_canonical_url_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

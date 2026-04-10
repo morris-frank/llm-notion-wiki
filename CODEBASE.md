@@ -49,7 +49,7 @@ Single package: **`llmwiki_runtime`** (console entry: `llmwiki-runtime` → `cli
 **Security**
 
 - **`ADMIN_API_KEY` unset**: `_admin_authorized()` allows any client for `/admin/*`. `serve` logs a warning and exits unless the bind address is loopback-only (`127.0.0.1`, `::1`, `localhost`) or `LLMWIKI_INSECURE_ADMIN=1` is set. Set `ADMIN_API_KEY` for exposed deployments.
-- **Webhook crypto**: `X-Notion-Signature` is verified only with `NOTION_WEBHOOK_SIGNING_SECRET`. `NOTION_WEBHOOK_VERIFICATION_TOKEN` is for Notion’s subscription handshake payload only, not for HMAC.
+- **Webhook crypto**: `X-Notion-Signature` is verified only with `NOTION_WEBHOOK_SIGNING_SECRET`. `NOTION_WEBHOOK_VERIFICATION_TOKEN` is for Notion’s subscription handshake payload only, not for HMAC. Handshake requests that include `verification_token` are rejected with 503 if the env token is unset.
 - **SSRF / arbitrary fetch**: `SourceFetcher` only allows `http`/`https` and rejects hosts that resolve to non-public addresses (private, loopback, link-local, etc.). DNS rebinding can still bypass hostname checks; run the worker in a network-isolated environment if the Notion integration is not trusted.
 - **Secrets in files**: `env.local` is gitignored; never commit tokens. Rotate anything that ever leaked into a repo or chat.
 

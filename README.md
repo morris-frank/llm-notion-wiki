@@ -38,7 +38,7 @@ llmwiki-runtime serve --host 0.0.0.0 --port 8000
 
 - **Worker**: Background thread polls queued jobs and runs one job per iteration (`POLL_INTERVAL_SECONDS` between attempts).
 - **Health**: `GET /healthz`
-- **Webhook**: `POST /notion/webhook` — set `NOTION_WEBHOOK_VERIFICATION_TOKEN` for Notion’s subscription handshake, and `NOTION_WEBHOOK_SIGNING_SECRET` for `X-Notion-Signature` on event deliveries (do not use the verification token as the HMAC key).
+- **Webhook**: `POST /notion/webhook` — set `NOTION_WEBHOOK_VERIFICATION_TOKEN` for Notion’s subscription handshake (handshake requests are rejected if unset), and `NOTION_WEBHOOK_SIGNING_SECRET` for `X-Notion-Signature` on event deliveries (do not use the verification token as the HMAC key).
 - **Webhook status**: `GET /notion/webhook/status`
 - **Admin**: `GET /admin/jobs`, `POST /admin/enqueue/source`, `POST /admin/requeue/job` — send header `X-Admin-Key` when `ADMIN_API_KEY` is set. If `ADMIN_API_KEY` is unset, `/admin/*` is unauthenticated: `serve` refuses to bind to non-loopback addresses unless you set `LLMWIKI_INSECURE_ADMIN=1` (local dev only).
 

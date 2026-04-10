@@ -221,6 +221,32 @@ class HTTPServiceTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.ACCEPTED)
         self.assertEqual(payload["job_id"], "job_2")
 
+    def test_admin_enqueue_invalid_json_returns_400(self) -> None:
+        req = request.Request(
+            f"{self.base_url}/admin/enqueue/source",
+            data=b"{",
+            headers={"Content-Type": "application/json", "X-Admin-Key": "admin-key"},
+            method="POST",
+        )
+        with self.assertRaises(error.HTTPError) as ctx:
+            request.urlopen(req)
+        self.assertEqual(ctx.exception.code, HTTPStatus.BAD_REQUEST)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"], "invalid json")
+
+    def test_admin_requeue_invalid_json_returns_400(self) -> None:
+        req = request.Request(
+            f"{self.base_url}/admin/requeue/job",
+            data=b"not-json",
+            headers={"Content-Type": "application/json", "X-Admin-Key": "admin-key"},
+            method="POST",
+        )
+        with self.assertRaises(error.HTTPError) as ctx:
+            request.urlopen(req)
+        self.assertEqual(ctx.exception.code, HTTPStatus.BAD_REQUEST)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"], "invalid json")
+
     def test_webhook_invalid_signature(self) -> None:
         status, payload = self._request_error(
             "POST",

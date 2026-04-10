@@ -182,6 +182,33 @@ class ServiceAndScriptTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
 
+    def test_webhook_rejects_handshake_when_verification_token_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                notion_token="token",
+                notion_version="2026-03-11",
+                notion_api_base="https://api.notion.com/v1",
+                control_db_id=None,
+                sources_data_source_id="sources",
+                wiki_data_source_id="wiki",
+                jobs_data_source_id="jobs",
+                policies_data_source_id="policies",
+                wiki_root=Path(tmpdir),
+                worker_name="worker",
+                poll_interval_seconds=5,
+                admin_api_key=None,
+                llm_api_key=None,
+                llm_api_base="https://example.com/v1",
+                llm_model=None,
+                notion_webhook_signing_secret="signing-secret",
+                notion_webhook_verification_token=None,
+                log_level="INFO",
+            )
+            app = ServiceApp(settings=settings, worker=StubWorker())
+            status, payload = app.handle_webhook(b'{"verification_token":"any"}', {})
+            self.assertEqual(status, 503)
+            self.assertIn("NOTION_WEBHOOK_VERIFICATION_TOKEN", payload["error"])
+
     def test_webhook_non_page_entity_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())

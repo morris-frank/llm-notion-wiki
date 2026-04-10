@@ -41,6 +41,7 @@ def assert_public_http_url(url: str) -> str:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as e:
         raise ValueError(f"Could not resolve host {host!r}") from e
+    checked_public = 0
     for info in infos:
         addr = info[4][0]
         try:
@@ -48,6 +49,9 @@ def assert_public_http_url(url: str) -> str:
         except ValueError:
             continue
         _reject_if_non_public_ip(resolved)
+        checked_public += 1
+    if checked_public == 0:
+        raise ValueError("URL host did not resolve to a public address")
     return url
 
 

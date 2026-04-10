@@ -186,7 +186,11 @@ class ServiceApp:
         verification_token = payload.get("verification_token")
         configured_token = self.settings.notion_webhook_verification_token
         if verification_token:
-            if configured_token and verification_token != configured_token:
+            if not configured_token:
+                return HTTPStatus.SERVICE_UNAVAILABLE, {
+                    "error": "NOTION_WEBHOOK_VERIFICATION_TOKEN is not configured (required for subscription handshake)"
+                }
+            if verification_token != configured_token:
                 return HTTPStatus.FORBIDDEN, {"error": "verification token mismatch"}
             verification_payload = {"verified_at": payload.get("timestamp"), "verification_token": verification_token}
             self._record_webhook_state("last_verification", verification_payload)
@@ -307,7 +311,11 @@ class LLMWikiRequestHandler(BaseHTTPRequestHandler):
             if not self._admin_authorized():
                 _json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid admin key"})
                 return
-            body = json.loads(raw_body.decode("utf-8"))
+            try:
+                body = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
+                return
             source_page_id = body.get("source_page_id")
             if not source_page_id:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "source_page_id is required"})
@@ -319,7 +327,11 @@ class LLMWikiRequestHandler(BaseHTTPRequestHandler):
             if not self._admin_authorized():
                 _json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid admin key"})
                 return
-            body = json.loads(raw_body.decode("utf-8"))
+            try:
+                body = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
+                return
             job_page_id = body.get("job_page_id")
             if not job_page_id:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "job_page_id is required"})
