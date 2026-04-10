@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 import tempfile
 import unittest
 
 from llmwiki_runtime.llm import StaticPlanner
-from llmwiki_runtime.models import JobRecord, ScopeContext, SourceArtifacts, SourceRecord, WikiPageMetadata
+from llmwiki_runtime.models import JobRecord, ScopeContext, SourceArtifacts, SourceRecord, WebhookResolveSource, WikiPageMetadata
 from llmwiki_runtime.paths import ScopedPaths
 from llmwiki_runtime.worker import Worker
 from llmwiki_runtime.wiki_ops import ensure_owner_scope, ensure_wiki_root
@@ -42,6 +43,7 @@ class FakeRepository:
         idempotency_key: str,
         scope_context: ScopeContext,
         policy_page_id: str | None = None,
+        **kwargs: Any,
     ) -> JobRecord:
         self.created_jobs.append((job_type, idempotency_key, scope_context.scope, scope_context.owner))
         return JobRecord(
@@ -79,12 +81,34 @@ class FakeRepository:
             raise self.backing_source_error
         return [f"page-for-{source_id}" for source_id in source_ids]
 
-    def upsert_wiki_page(self, metadata: WikiPageMetadata, *, backing_source_page_ids: list[str], latest_job_page_id: str) -> None:
+    def upsert_wiki_page(
+        self,
+        metadata: WikiPageMetadata,
+        *,
+        backing_source_page_ids: list[str],
+        latest_job_page_id: str,
+        related_entity_page_ids: list[str] | None = None,
+    ) -> None:
         self.upserted_pages.append(metadata)
         self.upserted_backing_source_page_ids.append(backing_source_page_ids)
 
-    def update_source_after_wiki(self, source: SourceRecord, *, source_summary_pointer: str) -> None:
+    def update_source_after_wiki(
+        self,
+        source: SourceRecord,
+        *,
+        source_summary_pointer: str,
+        related_entity_page_ids: list[str] | None = None,
+    ) -> None:
         self.updated_source_summary = source_summary_pointer
+
+    def resolve_webhook_page(self, page_id: str) -> WebhookResolveSource | None:
+        try:
+            source = self.get_source(page_id)
+        except Exception:
+            return None
+        if source.properties.get("Source Title") is None:
+            return None
+        return WebhookResolveSource(source=source)
 
     def mark_job_succeeded(self, page_id: str, *, started_at: str | None, output_pointer: str | None, diff_pointer: str | None) -> None:
         self.succeeded_jobs.append(page_id)
@@ -321,7 +345,7 @@ class WorkerFlowTests(unittest.TestCase):
             fetcher = FakeFetcher(root)
             worker = Worker(repository=repository, source_fetcher=fetcher, planner=StaticPlanner(response="{}"), wiki_root=root, worker_name="test-worker")
             fetcher.fetch(source)
-            bundle = worker._build_llm_bundle(
+            bundle = worker._build_source_bundle(
                 JobRecord(
                     page_id="update-page-id",
                     job_id="job_update",

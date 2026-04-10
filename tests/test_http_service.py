@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import hashlib
 from http import HTTPStatus
 import hmac
@@ -11,7 +13,7 @@ from urllib import error, request
 import unittest
 
 from llmwiki_runtime.config import Settings
-from llmwiki_runtime.models import JobRecord, ScopeContext, SourceRecord
+from llmwiki_runtime.models import JobRecord, ScopeContext, SourceRecord, WebhookResolveSource
 from llmwiki_runtime.service import LLMWikiHTTPServer, ServiceApp
 
 
@@ -75,9 +77,19 @@ class HTTPStubRepository:
         idempotency_key: str,
         scope_context: ScopeContext,
         policy_page_id: str | None = None,
+        **kwargs: Any,
     ):
         self.created_jobs.append((job_type, idempotency_key))
         return type("Job", (), {"job_id": "job-created", "scope": scope_context.scope, "owner": scope_context.owner})()
+
+    def resolve_webhook_page(self, page_id: str) -> WebhookResolveSource | None:
+        try:
+            source = self.get_source(page_id)
+        except error.HTTPError:
+            return None
+        if source.properties.get("Source Title") is None:
+            return None
+        return WebhookResolveSource(source=source)
 
 
 class HTTPStubWorker:
@@ -218,6 +230,19 @@ class HTTPServiceTests(unittest.TestCase):
         )
         self.assertEqual(status, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(payload["error"], "invalid signature")
+
+    def test_webhook_invalid_json_returns_400(self) -> None:
+        req = request.Request(
+            f"{self.base_url}/notion/webhook",
+            data=b"not-json{",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(error.HTTPError) as ctx:
+            request.urlopen(req)
+        self.assertEqual(ctx.exception.code, HTTPStatus.BAD_REQUEST)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"], "invalid json")
 
     def test_webhook_verification_handshake(self) -> None:
         status, payload = self._request("POST", "/notion/webhook", payload={"verification_token": "verify-token"})

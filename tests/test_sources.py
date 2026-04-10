@@ -7,7 +7,7 @@ from unittest import mock
 import unittest
 
 from llmwiki_runtime.models import SourceRecord
-from llmwiki_runtime.sources import SourceFetcher
+from llmwiki_runtime.sources import SourceFetcher, assert_public_http_url
 from llmwiki_runtime.wiki_ops import ensure_wiki_root
 
 
@@ -121,6 +121,18 @@ class SourceFetcherTests(unittest.TestCase):
             )
             artifacts = fetcher.fetch(source)
             self.assertIn("# Fallback Title", artifacts.markdown)
+
+    def test_assert_public_http_url_rejects_file_scheme(self) -> None:
+        with self.assertRaises(ValueError):
+            assert_public_http_url("file:///etc/passwd")
+
+    def test_assert_public_http_url_rejects_loopback_literal(self) -> None:
+        with self.assertRaises(ValueError):
+            assert_public_http_url("http://127.0.0.1/path")
+
+    def test_assert_public_http_url_rejects_private_literal(self) -> None:
+        with self.assertRaises(ValueError):
+            assert_public_http_url("http://192.168.0.1/path")
 
     def test_web_page_missing_canonical_url_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

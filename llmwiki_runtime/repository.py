@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 from typing import Any
+from urllib import error
 from uuid import uuid4
 
 from .models import (
@@ -14,9 +15,15 @@ from .models import (
     QuestionRecord,
     ScopeContext,
     SourceRecord,
+    WebhookResolvePromotion,
+    WebhookResolveQuestion,
+    WebhookResolveResult,
+    WebhookResolveSource,
     WikiPageMetadata,
 )
+
 from .notion import (
+    NotionAPIError,
     NotionClient,
     checkbox_property,
     date_property,
@@ -228,6 +235,23 @@ class NotionRepository:
 
     def get_source(self, source_page_id: str) -> SourceRecord:
         return self._source_from_page(self.client.retrieve_page(source_page_id))
+
+    def resolve_webhook_page(self, page_id: str) -> WebhookResolveResult | None:
+        try:
+            page = self.client.retrieve_page(page_id)
+        except (NotionAPIError, error.HTTPError):
+            return None
+        properties = page.get("properties", {})
+        if "Source Title" in properties:
+            return WebhookResolveSource(source=self._source_from_page(page))
+        if "Question" in properties and self.questions_data_source_id:
+            return WebhookResolveQuestion(question=self._question_from_page(page))
+        if "Promotion ID" in properties and self.promotions_data_source_id:
+            return WebhookResolvePromotion(promotion=self._promotion_from_page(page))
+        source = self._source_from_page(page)
+        if source.properties.get("Source Title") is None:
+            return None
+        return WebhookResolveSource(source=source)
 
     def get_question(self, question_page_id: str) -> QuestionRecord:
         if not self.questions_data_source_id:

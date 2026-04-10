@@ -117,25 +117,17 @@ class Worker:
         )
 
     def _create_job(self, **kwargs):
-        if "trigger_type" in kwargs and "trigger_type" not in getattr(self.repository.create_job, "__code__", type("x", (), {"co_varnames": ()})).co_varnames:
-            kwargs.pop("trigger_type")
         return self.repository.create_job(**kwargs)
 
     def _update_source_after_wiki(self, source_record: SourceRecord, *, source_summary_pointer: str, related_entity_page_ids: list[str]) -> None:
-        method = self.repository.update_source_after_wiki
-        code = getattr(method, "__code__", None)
-        if code is not None and "related_entity_page_ids" not in code.co_varnames:
-            method(source_record, source_summary_pointer=source_summary_pointer)
-            return
-        method(source_record, source_summary_pointer=source_summary_pointer, related_entity_page_ids=related_entity_page_ids)
+        self.repository.update_source_after_wiki(
+            source_record,
+            source_summary_pointer=source_summary_pointer,
+            related_entity_page_ids=related_entity_page_ids,
+        )
 
     def _upsert_wiki_page(self, metadata, *, backing_source_page_ids: list[str], latest_job_page_id: str, related_entity_page_ids: list[str]) -> str:
-        method = self.repository.upsert_wiki_page
-        code = getattr(method, "__code__", None)
-        if code is not None and "related_entity_page_ids" not in code.co_varnames:
-            result = method(metadata, backing_source_page_ids=backing_source_page_ids, latest_job_page_id=latest_job_page_id)
-            return metadata.path if result is None else result
-        result = method(
+        result = self.repository.upsert_wiki_page(
             metadata,
             backing_source_page_ids=backing_source_page_ids,
             latest_job_page_id=latest_job_page_id,
@@ -268,9 +260,6 @@ class Worker:
             "operation_schema": FILE_OPERATION_CONTRACT,
             "effective_policy": self._policy_payload(policy),
         }
-
-    def _build_llm_bundle(self, job: JobRecord, source: SourceRecord, scoped_paths: ScopedPaths, artifacts_dir: Path) -> dict[str, Any]:
-        return self._build_source_bundle(job, source, scoped_paths, artifacts_dir)
 
     def _build_question_bundle(self, job: JobRecord, question: QuestionRecord) -> dict[str, Any]:
         scoped_paths = ScopedPaths(self.wiki_root, question.scope_context)

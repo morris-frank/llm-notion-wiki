@@ -2,16 +2,53 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html.parser import HTMLParser
+import ipaddress
 import json
 from pathlib import Path
 import re
+import socket
 from typing import Any
 from urllib import request
+from urllib.parse import urlparse
 
 from .models import SourceArtifacts, SourceRecord
 from .notion import NotionClient, notion_page_id_from_reference
 from .paths import ScopedPaths
 from .wiki_ops import sha256_text
+
+
+def _reject_if_non_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        raise ValueError("URL host resolves to a non-public address")
+
+
+def assert_public_http_url(url: str) -> str:
+    """Reject non-http(s) schemes and hosts that resolve to non-public addresses (SSRF mitigation)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme must be http or https, got {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL has no host")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        _reject_if_non_public_ip(literal)
+        return url
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve host {host!r}") from e
+    for info in infos:
+        addr = info[4][0]
+        try:
+            resolved = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        _reject_if_non_public_ip(resolved)
+    return url
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -81,8 +118,9 @@ class SourceFetcher:
     def _fetch_web_page(self, source: SourceRecord, output_dir: Path) -> SourceArtifacts:
         if not source.canonical_url:
             raise ValueError(f"web_page source is missing Canonical URL: {source.source_id}")
+        fetch_url = assert_public_http_url(source.canonical_url)
         req = request.Request(
-            source.canonical_url,
+            fetch_url,
             headers={
                 "User-Agent": "Mozilla/5.0 (compatible; llmwiki-runtime/0.1; +https://example.invalid)",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

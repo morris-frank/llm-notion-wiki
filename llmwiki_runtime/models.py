@@ -217,3 +217,21 @@ class PromotionRecord:
     @property
     def scope_context(self) -> ScopeContext:
         return ScopeContext(self.scope, self.owner)
+
+
+@dataclass(frozen=True)
+class WebhookResolveSource:
+    source: SourceRecord
+
+
+@dataclass(frozen=True)
+class WebhookResolveQuestion:
+    question: QuestionRecord
+
+
+@dataclass(frozen=True)
+class WebhookResolvePromotion:
+    promotion: PromotionRecord
+
+
+WebhookResolveResult = WebhookResolveSource | WebhookResolveQuestion | WebhookResolvePromotion

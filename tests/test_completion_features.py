@@ -9,7 +9,16 @@ import unittest
 
 from llmwiki_runtime.config import Settings
 from llmwiki_runtime.llm import StaticPlanner
-from llmwiki_runtime.models import JobRecord, PolicyRecord, PromotionRecord, QuestionRecord, ScopeContext, WikiPageMetadata
+from llmwiki_runtime.models import (
+    JobRecord,
+    PolicyRecord,
+    PromotionRecord,
+    QuestionRecord,
+    ScopeContext,
+    WebhookResolvePromotion,
+    WebhookResolveQuestion,
+    WikiPageMetadata,
+)
 from llmwiki_runtime.repository import NotionRepository
 from llmwiki_runtime.service import ServiceApp
 from llmwiki_runtime.worker import Worker
@@ -150,6 +159,15 @@ class ServiceRoutingRepository:
     def create_job(self, **kwargs):
         self.created_jobs.append((kwargs["job_type"], kwargs["idempotency_key"]))
         return type("Job", (), {"job_id": "job-created", "scope": kwargs["scope_context"].scope, "owner": kwargs["scope_context"].owner})()
+
+    def resolve_webhook_page(self, page_id: str) -> WebhookResolveQuestion | WebhookResolvePromotion | None:
+        page = self.retrieve_page(page_id)
+        properties = page.get("properties", {})
+        if "Question" in properties and self.questions_data_source_id:
+            return WebhookResolveQuestion(question=self._question_from_page(page))
+        if "Promotion ID" in properties and self.promotions_data_source_id:
+            return WebhookResolvePromotion(promotion=self._promotion_from_page(page))
+        return None
 
     def query_jobs(self, *, status: str | None = None, page_size: int = 20):
         return []
