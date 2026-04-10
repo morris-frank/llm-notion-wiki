@@ -209,9 +209,10 @@ class NotionRepository:
 
     def _promotion_from_page(self, page: dict[str, Any]) -> PromotionRecord:
         scope_context = _scope_context(page)
+        promotion_id = _title(page, "Promotion ID") or _rich_text(page, "Promotion ID") or page["id"]
         return PromotionRecord(
             page_id=page["id"],
-            promotion_id=_rich_text(page, "Promotion ID") or page["id"],
+            promotion_id=promotion_id,
             scope=scope_context.scope,
             owner=scope_context.owner,
             status=_select(page, "Status") or "pending",
