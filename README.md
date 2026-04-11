@@ -93,11 +93,9 @@ Set `PUBLIC_BASE_URL` to the **origin** Notion will use to reach your server, wi
 
 1. Deploy the service so `GET https://<your-domain>/healthz` works.
 2. In the integration’s **Webhook** settings in Notion, set the webhook URL to:
-
-   `https://<your-domain>/notion/webhook`
-
-3. Notion will send a **subscription handshake** payload containing `verification_token`. Copy that value into **`NOTION_WEBHOOK_VERIFICATION_TOKEN`** on the server (the server rejects handshake requests if this env var is unset).
-4. Copy the **signing secret** for `X-Notion-Signature` into **`NOTION_WEBHOOK_SIGNING_SECRET`**. Do not use the verification token as the HMAC key.
+  `https://<your-domain>/notion/webhook`
+3. Notion will send a **subscription handshake** payload containing `verification_token`. Copy that value into `**NOTION_WEBHOOK_VERIFICATION_TOKEN`** on the server (the server rejects handshake requests if this env var is unset).
+4. Copy the **signing secret** for `X-Notion-Signature` into `**NOTION_WEBHOOK_SIGNING_SECRET`**. Do not use the verification token as the HMAC key.
 5. On the server, run `llmwiki-runtime webhook doctor` with the same env loaded to confirm `endpoint`, signing secret, and verification token flags.
 6. In Notion, subscribe to the relevant **page** events for your control-plane databases (per Notion’s webhook UI).
 
@@ -105,11 +103,11 @@ You can sanity-check a signature locally with `llmwiki-runtime webhook verify --
 
 ### 6. Admin API key (`ADMIN_API_KEY`)
 
-Generate a long random value (e.g. `openssl rand -hex 32`) and set **`ADMIN_API_KEY`**. Clients must send header **`X-Admin-Key`** on `/admin/*` routes. For production, always set this; do not rely on **`LLMWIKI_INSECURE_ADMIN`** except for local development.
+Generate a long random value (e.g. `openssl rand -hex 32`) and set `**ADMIN_API_KEY`**. Clients must send header `**X-Admin-Key`** on `/admin/*` routes. For production, always set this; do not rely on `**LLMWIKI_INSECURE_ADMIN**` except for local development.
 
 ### 7. Optional: LLM for wiki updates / questions / promotions
 
-Set **`OPENAI_API_KEY`** and **`OPENAI_MODEL`** (or `LLM_*` equivalents) and an OpenAI-compatible **`OPENAI_BASE_URL`** if needed. Without these, `ingest_source` still runs; `update_wiki`, `answer_question`, and `promote_private` need a configured planner.
+Set `**OPENAI_API_KEY**` and `**OPENAI_MODEL**` (or `LLM_*` equivalents) and an OpenAI-compatible `**OPENAI_BASE_URL**` if needed. Without these, `ingest_source` still runs; `update_wiki`, `answer_question`, and `promote_private` need a configured planner.
 
 ## Run the HTTP server + worker
 
@@ -121,7 +119,7 @@ llmwiki-runtime serve --host 0.0.0.0 --port 8000
 - **Health**: `GET /healthz`
 - **Webhook**: `POST /notion/webhook` — set `NOTION_WEBHOOK_VERIFICATION_TOKEN` for Notion’s subscription handshake (handshake requests are rejected if unset), and `NOTION_WEBHOOK_SIGNING_SECRET` for `X-Notion-Signature` on event deliveries (do not use the verification token as the HMAC key).
 - **Webhook status**: `GET /notion/webhook/status`
-- **Admin**: `GET /admin/jobs`, `POST /admin/enqueue/source`, `POST /admin/requeue/job` — send header `X-Admin-Key` when `ADMIN_API_KEY` is set. If `ADMIN_API_KEY` is unset, `/admin/*` is unauthenticated: `serve` refuses to bind to non-loopback addresses unless you set `LLMWIKI_INSECURE_ADMIN=1` (local dev only).
+- **Admin**: `GET /admin/jobs`, `POST /admin/enqueue/source`, `POST /admin/requeue/job` — send header `X-Admin-Key` when `ADMIN_API_KEY` is set. If `ADMIN_API_KEY` is unset, `/admin/`* is unauthenticated: `serve` refuses to bind to non-loopback addresses unless you set `LLMWIKI_INSECURE_ADMIN=1` (local dev only).
 
 ## CLI (same binary)
 
@@ -147,7 +145,7 @@ Under `WIKI_ROOT`, the app expects scoped trees such as `wiki/shared/`, `wiki/us
 
 | Doc                                                  | Content                                                                    |
 | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| This README (Hosted deployment, Notion…)            | VPS / GCP deployment and Notion tokens, data sources, webhooks, admin.    |
+| This README (Hosted deployment, Notion…)             | VPS / GCP deployment and Notion tokens, data sources, webhooks, admin.     |
 | [docs/shared.md](docs/shared.md)                     | Scoped filesystem layout and scope model (matches the runtime).            |
 | [docs/interface.md](docs/interface.md)               | LLM JSON run envelope and file operations (`dry_run`, `page_type`, paths). |
 | [docs/wp3-worker-algo.md](docs/wp3-worker-algo.md)   | Worker phases and scoped artifact paths.                                   |
@@ -156,4 +154,3 @@ Under `WIKI_ROOT`, the app expects scoped trees such as `wiki/shared/`, `wiki/us
 
 
 Historical flat-layout notes: [docs/wp3.md](docs/wp3.md) (deprecated for this runtime).
-
