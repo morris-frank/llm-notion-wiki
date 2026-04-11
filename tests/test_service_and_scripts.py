@@ -142,6 +142,40 @@ class ServiceAndScriptTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 serve(settings, "0.0.0.0", 8000)
 
+    def test_webhook_status_tolerates_corrupt_state_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_dir = root / "state" / "webhook"
+            state_dir.mkdir(parents=True)
+            (state_dir / "last_delivery.json").write_text("{not json", encoding="utf-8")
+            (state_dir / "last_verification.json").write_text("[]", encoding="utf-8")
+            settings = Settings(
+                notion_token="token",
+                notion_version="2026-03-11",
+                notion_api_base="https://api.notion.com/v1",
+                control_db_id=None,
+                sources_data_source_id="sources",
+                wiki_data_source_id="wiki",
+                jobs_data_source_id="jobs",
+                policies_data_source_id="policies",
+                wiki_root=root,
+                worker_name="worker",
+                poll_interval_seconds=5,
+                admin_api_key=None,
+                llm_api_key=None,
+                llm_api_base="https://example.com/v1",
+                llm_model=None,
+                notion_webhook_signing_secret="secret",
+                notion_webhook_verification_token="v",
+                log_level="INFO",
+            )
+            app = ServiceApp(settings=settings, worker=StubWorker())
+            status = app.webhook_status()
+            self.assertIsNone(status["last_delivery"])
+            self.assertIsNone(status["last_verification"])
+            self.assertEqual(status["last_delivery_error"], "invalid_json")
+            self.assertEqual(status["last_verification_error"], "invalid_shape")
+
     def test_webhook_signature_and_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             app = ServiceApp(settings=_settings(tmpdir), worker=StubWorker())

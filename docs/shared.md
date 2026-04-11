@@ -81,7 +81,7 @@ llmwiki/
 **Notes**
 
 - **Index and changelog** both live under `wiki/<scope>/indexes/` (`index.md`, `ingest-log.md`). The runtime uses `page_type` `index` vs `changelog` with path rules in `paths.py`.
-- **`state/`** may also contain operational files (e.g. live verification reports) not listed above.
+- `**state/`** may also contain operational files (e.g. live verification reports) not listed above.
 - Optional future directories such as `ingestion_logs/` or `locks/` are not created by the current runtime; do not assume they exist.
 
 ## 2. Scope model
@@ -181,15 +181,17 @@ promotion_origin: null
 
 Writable wiki roots per scope are:
 
-| Area | Purpose |
-|------|---------|
-| `sources/` | One summary page per source ID (`<source_id>.md`) |
-| `concepts/` | Stable definitions and narrative concept pages |
-| `entities/` | **Shared scope only** in the current runtime — canonical entity pages |
-| `faq/` | Answered Q&A (durable FAQ entries) |
-| `open_questions/` | Unresolved questions (`page_type` **question** in JSON plans) |
-| `synthesis/` | e.g. `current-state.md` |
-| `indexes/` | Navigation (`index.md`) and append-only ingest log (`ingest-log.md`, `page_type` **changelog**) |
+
+| Area              | Purpose                                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------------------- |
+| `sources/`        | One summary page per source ID (`<source_id>.md`)                                               |
+| `concepts/`       | Stable definitions and narrative concept pages                                                  |
+| `entities/`       | **Shared scope only** in the current runtime — canonical entity pages                           |
+| `faq/`            | Answered Q&A (durable FAQ entries)                                                              |
+| `open_questions/` | Unresolved questions (`page_type` **question** in JSON plans)                                   |
+| `synthesis/`      | e.g. `current-state.md`                                                                         |
+| `indexes/`        | Navigation (`index.md`) and append-only ingest log (`ingest-log.md`, `page_type` **changelog**) |
+
 
 Decisions, projects, procedures, or private `notes/` trees are **not** separate top-level directories in the current implementation; model that content as **concepts** or other **allowed page types** under the paths above.
 

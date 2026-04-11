@@ -62,7 +62,7 @@ def _question_props(question_id: str, text: str, scope_context: ScopeContext) ->
 
 def _promotion_props(promotion_id: str, scope_context: ScopeContext, source_private_page_id: str) -> dict[str, Any]:
     return {
-        "Promotion ID": rich_text_property(promotion_id),
+        "Promotion ID": title_property(promotion_id),
         "Scope": select_property(scope_context.scope),
         "Owner": rich_text_property(scope_context.owner or ""),
         "Status": select_property("approved"),
