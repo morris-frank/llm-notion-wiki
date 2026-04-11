@@ -16,7 +16,7 @@ The interface should guarantee:
 	•	explicit conflict/review signalling
 	•	worker-side validation before write
 
-2. Exact top-level JSON shape
+1. Exact top-level JSON shape
 
 {
   "schema_version": "v1",
@@ -46,14 +46,16 @@ The interface should guarantee:
   "warnings": []
 }
 
-3. Allowed run_mode
+1. Allowed run_mode
 
 "run_mode": "apply|dry_run"
 
-	•	apply: worker validates, writes wiki files, updates manifest, syncs Notion wiki/source rows, writes diff + run record
-	•	dry_run: worker validates and writes a **run record** with `dry_run: true` and projected `changed_files`; it does **not** write wiki markdown to disk, manifest, diff patch, or call Notion wiki/source upserts. The **job row** in Notion is still marked succeeded with the run record URI as output (implementation: `llmwiki-runtime`).
+```
+•	apply: worker validates, writes wiki files, updates manifest, syncs Notion wiki/source rows, writes diff + run record
+•	dry_run: worker validates and writes a **run record** with `dry_run: true` and projected `changed_files`; it does **not** write wiki markdown to disk, manifest, diff patch, or call Notion wiki/source upserts. The **job row** in Notion is still marked succeeded with the run record URI as output (implementation: `llmwiki-runtime`).
+```
 
-4. summary object
+1. summary object
 
 {
   "decision": "create_new_pages|update_existing_pages|mixed|no_op|conflict_detected",
@@ -66,7 +68,7 @@ Rules:
 	•	decision=no_op requires operations=[]
 	•	decision=conflict_detected should usually set review_required=true
 
-5. operations array
+1. operations array
 
 Each element must be exactly one of these operation types:
 	•	create_file
@@ -86,7 +88,7 @@ Use only when the target does not already exist.
   "path": "wiki/shared/sources/src_karpathy_llmwiki_001.md",
   "page_type": "source",
   "reason": "New source summary page.",
-  "content": "---\ntitle: \"Karpathy llm-wiki gist\"\npage_type: \"source\"\nslug: \"src-karpathy-llmwiki-001\"\nstatus: \"draft\"\nupdated_at: \"2026-04-09T14:00:00Z\"\nsource_ids:\n  - \"src_karpathy_llmwiki_001\"\nentity_keys: []\nconcept_keys:\n  - \"llmwiki\"\nconfidence: \"medium\"\nreview_required: false\nsource_type: \"web_page\"\ncanonical_url: \"https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum: \"sha256:...\"\n---\n\n# Karpathy llm-wiki gist\n\n## One-line summary\n...\n",
+  "content": "---\ntitle: Karpathy llm-wiki gist\npage_type: source\nslug: src-karpathy-llmwiki-001\nstatus: draft\nupdated_at: 2026-04-09T14:00:00Z\nsource_ids:\n  - src_karpathy_llmwiki_001\nentity_keys: []\nconcept_keys:\n  - llmwiki\nconfidence: medium\nreview_required: false\nsource_type: web_page\ncanonical_url: [https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum): sha256:...\n---\n\n# Karpathy llm-wiki gist\n\n## One-line summary\n...\n",
   "content_sha256": "optional-hash-of-content"
 }
 
@@ -137,7 +139,7 @@ Preferred update mode for normal page edits.
       "section": "## Sources",
       "action": "upsert_bullet",
       "match_key": "[S:src_karpathy_llmwiki_001]",
-      "content": "- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+      "content": "- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. [https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)"
     }
   ],
   "previous_content_sha256": "expected-old-hash"
@@ -174,7 +176,7 @@ Use when no file changes are needed.
   "reason": "Navigation remains sufficient; no update required."
 }
 
-6. page_type enum
+1. page_type enum
 
 Every operation must declare one of:
 
@@ -182,7 +184,7 @@ Every operation must declare one of:
 
 Worker should reject any other value.
 
-7. Path rules
+1. Path rules
 
 Worker must enforce:
 	•	path must start with wiki/
@@ -203,12 +205,12 @@ Examples (shared scope):
 
 Private scope uses the same page types under `wiki/users/<owner>/...` (seeded layout has no private `entities/` root).
 
-8. Full JSON Schema
+1. Full JSON Schema
 
 This is a practical strict schema for worker validation.
 
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "[https://json-schema.org/draft/2020-12/schema](https://json-schema.org/draft/2020-12/schema)",
   "title": "LLMWikiWorkerRun",
   "type": "object",
   "additionalProperties": false,
@@ -395,7 +397,7 @@ This is a practical strict schema for worker validation.
   }
 }
 
-9. Worker-side validation rules beyond schema
+1. Worker-side validation rules beyond schema
 
 The JSON schema is not enough. The worker should also enforce:
 
@@ -422,7 +424,7 @@ Diff minimisation
 	•	prefer patch_sections over replace_file
 	•	reject replace_file when only changelog append is needed
 
-10. Recommended prompt instruction for this interface
+1. Recommended prompt instruction for this interface
 
 Add this exact section to AGENTS.md:
 
@@ -433,11 +435,12 @@ You do not write files directly.
 You must return exactly one JSON object conforming to the worker run schema.
 
 Your output must:
+
 - be valid JSON only
 - contain no markdown fences
 - contain no commentary outside JSON
 - use only allowed operation types:
-  `create_file`, `replace_file`, `patch_sections`, `append_block`, `no_op`
+`create_file`, `replace_file`, `patch_sections`, `append_block`, `no_op`
 
 Prefer `patch_sections` over `replace_file`.
 
@@ -453,7 +456,7 @@ Do not emit duplicate operations for the same path unless they are merged into o
 
 Every touched page must remain valid markdown with valid frontmatter.
 
-11. Example complete LLM response
+1. Example complete LLM response
 
 {
   "schema_version": "v1",
@@ -477,7 +480,7 @@ Every touched page must remain valid markdown with valid frontmatter.
       "path": "wiki/shared/sources/src_karpathy_llmwiki_001.md",
       "page_type": "source",
       "reason": "New source summary page.",
-      "content": "---\ntitle: \"Karpathy llm-wiki gist\"\npage_type: \"source\"\nslug: \"src-karpathy-llmwiki-001\"\nstatus: \"draft\"\nupdated_at: \"2026-04-09T14:00:00Z\"\nsource_ids:\n  - \"src_karpathy_llmwiki_001\"\nentity_keys: []\nconcept_keys:\n  - \"llmwiki\"\nconfidence: \"medium\"\nreview_required: false\nsource_type: \"web_page\"\ncanonical_url: \"https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum: \"sha256:...\"\n---\n\n# Karpathy llm-wiki gist\n\n## One-line summary\nA source page describing the LLMWiki pattern as a maintained markdown knowledge layer.\n\n## Source summary\n...\n\n## Main claims\n- The wiki should be a maintained directory of markdown files. [S:src_karpathy_llmwiki_001]\n\n## Important entities\n- Andrej Karpathy [S:src_karpathy_llmwiki_001]\n\n## Important concepts\n- LLMWiki [S:src_karpathy_llmwiki_001]\n\n## Reliability notes\n- Primary source authored by the originator of the concept. [S:src_karpathy_llmwiki_001]\n\n## Related pages\n- [[llmwiki]]\n\n## Change log\n- 2026-04-09: created from source src_karpathy_llmwiki_001\n\n## Sources\n- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\n"
+      "content": "---\ntitle: Karpathy llm-wiki gist\npage_type: source\nslug: src-karpathy-llmwiki-001\nstatus: draft\nupdated_at: 2026-04-09T14:00:00Z\nsource_ids:\n  - src_karpathy_llmwiki_001\nentity_keys: []\nconcept_keys:\n  - llmwiki\nconfidence: medium\nreview_required: false\nsource_type: web_page\ncanonical_url: [https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\"\nchecksum): sha256:...\n---\n\n# Karpathy llm-wiki gist\n\n## One-line summary\nA source page describing the LLMWiki pattern as a maintained markdown knowledge layer.\n\n## Source summary\n...\n\n## Main claims\n- The wiki should be a maintained directory of markdown files. [S:src_karpathy_llmwiki_001]\n\n## Important entities\n- Andrej Karpathy [S:src_karpathy_llmwiki_001]\n\n## Important concepts\n- LLMWiki [S:src_karpathy_llmwiki_001]\n\n## Reliability notes\n- Primary source authored by the originator of the concept. [S:src_karpathy_llmwiki_001]\n\n## Related pages\n- [[llmwiki]]\n\n## Change log\n- 2026-04-09: created from source src_karpathy_llmwiki_001\n\n## Sources\n- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. [https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\n](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f\n)"
     },
     {
       "op": "patch_sections",
@@ -494,7 +497,7 @@ Every touched page must remain valid markdown with valid frontmatter.
           "section": "## Sources",
           "action": "upsert_bullet",
           "match_key": "[S:src_karpathy_llmwiki_001]",
-          "content": "- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+          "content": "- [S:src_karpathy_llmwiki_001] Karpathy llm-wiki gist. [https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)"
         },
         {
           "section": "## Change log",
@@ -522,7 +525,7 @@ Every touched page must remain valid markdown with valid frontmatter.
   "warnings": []
 }
 
-12. Recommendation for v1
+1. Recommendation for v1
 
 For v1, permit only:
 	•	create_file

@@ -147,16 +147,34 @@ class ServiceApp:
         path = self._webhook_state_dir() / f"{name}.json"
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
+    def _load_webhook_state_json(self, filename: str) -> tuple[Any | None, str | None]:
+        path = self._webhook_state_dir() / filename
+        if not path.exists():
+            return None, None
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            LOGGER.warning("Failed to read webhook state file %s: %s", path, exc)
+            return None, "read_failed"
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            LOGGER.warning("Invalid JSON in webhook state file %s: %s", path, exc)
+            return None, "invalid_json"
+        return data, None
+
     def webhook_status(self) -> dict[str, Any]:
-        last_delivery = None
-        delivery_path = self._webhook_state_dir() / "last_delivery.json"
-        if delivery_path.exists():
-            last_delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
-        verification = None
-        verification_path = self._webhook_state_dir() / "last_verification.json"
-        if verification_path.exists():
-            verification = json.loads(verification_path.read_text(encoding="utf-8"))
-        return {
+        last_delivery, last_delivery_err = self._load_webhook_state_json("last_delivery.json")
+        verification, verification_err = self._load_webhook_state_json("last_verification.json")
+        if last_delivery is not None and not isinstance(last_delivery, dict):
+            LOGGER.warning("Webhook state last_delivery.json is not a JSON object; ignoring")
+            last_delivery = None
+            last_delivery_err = last_delivery_err or "invalid_shape"
+        if verification is not None and not isinstance(verification, dict):
+            LOGGER.warning("Webhook state last_verification.json is not a JSON object; ignoring")
+            verification = None
+            verification_err = verification_err or "invalid_shape"
+        payload: dict[str, Any] = {
             "ready": bool(self.settings.notion_webhook_signing_secret),
             "public_base_url": self.settings.public_base_url,
             "endpoint": None if not self.settings.public_base_url else f"{self.settings.public_base_url.rstrip('/')}/notion/webhook",
@@ -165,6 +183,11 @@ class ServiceApp:
             "last_delivery": last_delivery,
             "last_verification": verification,
         }
+        if last_delivery_err:
+            payload["last_delivery_error"] = last_delivery_err
+        if verification_err:
+            payload["last_verification_error"] = verification_err
+        return payload
 
     def _signed(self, raw_body: bytes, signature: str | None) -> bool:
         # HMAC uses NOTION_WEBHOOK_SIGNING_SECRET only; NOTION_WEBHOOK_VERIFICATION_TOKEN is for handshake payloads.
